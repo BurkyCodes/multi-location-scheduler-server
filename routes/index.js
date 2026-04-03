@@ -1,0 +1,42 @@
+import { Router } from "express";
+import healthRoutes from "./health.route.js";
+import authRoutes from "./auth.route.js";
+import userRoutes from "./user.route.js";
+import userRoleRoutes from "./userRole.route.js";
+import locationRoutes from "./location.route.js";
+import skillRoutes from "./skill.route.js";
+import certificationRoutes from "./certification.route.js";
+import availabilityRoutes from "./availability.route.js";
+import preferenceRoutes from "./preference.route.js";
+import scheduleRoutes from "./schedule.route.js";
+import shiftRoutes from "./shift.route.js";
+import assignmentRoutes from "./assignment.route.js";
+import swapRequestRoutes from "./swapRequest.route.js";
+import laborAlertRoutes from "./laborAlert.route.js";
+import fairnessRoutes from "./fairness.route.js";
+import notificationRoutes from "./notification.route.js";
+import clockEventRoutes from "./clockEvent.route.js";
+import auditLogRoutes from "./auditLog.route.js";
+
+const router = Router();
+
+router.use("/health", healthRoutes);
+router.use("/v1/auth", authRoutes);
+router.use("/users", userRoutes);
+router.use("/user-roles", userRoleRoutes);
+router.use("/locations", locationRoutes);
+router.use("/skills", skillRoutes);
+router.use("/certifications", certificationRoutes);
+router.use("/availabilities", availabilityRoutes);
+router.use("/preferences", preferenceRoutes);
+router.use("/schedules", scheduleRoutes);
+router.use("/shifts", shiftRoutes);
+router.use("/assignments", assignmentRoutes);
+router.use("/swap-requests", swapRequestRoutes);
+router.use("/labor-alerts", laborAlertRoutes);
+router.use("/fairness-snapshots", fairnessRoutes);
+router.use("/notifications", notificationRoutes);
+router.use("/clock-events", clockEventRoutes);
+router.use("/audit-logs", auditLogRoutes);
+
+export default router;

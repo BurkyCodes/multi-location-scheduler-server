@@ -86,6 +86,4 @@ const availabilitySchema = new Schema(
   }
 );
 
-availabilitySchema.index({ user_id: 1 });
-
 export default mongoose.model("availabilities", availabilitySchema);

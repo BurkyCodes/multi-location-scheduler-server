@@ -1,0 +1,199 @@
+schemas:
+  ApiError:
+    type: object
+    properties:
+      success:
+        type: boolean
+        example: false
+      message:
+        type: string
+        example: Validation failed
+
+  GmsRegistration:
+    type: object
+    required:
+      - phone_number
+      - password
+      - organization_name
+      - garage_name
+    properties:
+      phone_number:
+        type: string
+        example: "254712345678"
+      country_code:
+        type: string
+        example: "+254"
+      password:
+        type: string
+        example: "StrongPass@123"
+      name:
+        type: string
+        example: "John Doe"
+      organization_name:
+        type: string
+        example: "Coastal Eats Group"
+      garage_name:
+        type: string
+        example: "Coastal Eats Central Garage"
+
+  Login:
+    type: object
+    required:
+      - phone_number
+      - password
+    properties:
+      phone_number:
+        type: string
+        example: "254712345678"
+      password:
+        type: string
+        example: "StrongPass@123"
+      organization_id:
+        type: string
+        example: "org_123"
+
+  VerifyPhoneNumber:
+    type: object
+    required:
+      - phone_number
+      - otp
+    properties:
+      phone_number:
+        type: string
+      otp:
+        type: string
+        example: "123456"
+
+  ResendOtpRequest:
+    type: object
+    required:
+      - phone_number
+      - type
+    properties:
+      phone_number:
+        type: string
+      type:
+        type: string
+        enum: [verification, reset_password, unlock_account]
+
+  ResetPasswordOtpRequest:
+    type: object
+    required:
+      - phone_number
+    properties:
+      phone_number:
+        type: string
+        example: "254712345678"
+
+  ResetPassword:
+    type: object
+    required:
+      - phone_number
+      - otp
+      - new_password
+    properties:
+      phone_number:
+        type: string
+      otp:
+        type: string
+      new_password:
+        type: string
+        example: "AnotherStrongPass@123"
+
+  RequestUnlockAccountOtp:
+    type: object
+    required:
+      - phone_number
+    properties:
+      phone_number:
+        type: string
+        example: "254712345678"
+
+  UnlockAccount:
+    type: object
+    required:
+      - phone_number
+      - otp
+    properties:
+      phone_number:
+        type: string
+      otp:
+        type: string
+
+  UserProfileResponse:
+    type: object
+    properties:
+      user:
+        type: object
+      organization:
+        type: object
+      active_garages:
+        type: array
+        items:
+          type: object
+      permissions:
+        type: array
+        items:
+          type: string
+      subscription:
+        type: object
+
+  UserDetailResponse:
+    type: object
+    properties:
+      user:
+        type: object
+      garage:
+        type: object
+      vehicles:
+        type: array
+        items:
+          type: object
+      invoices:
+        type: array
+        items:
+          type: object
+      engagements:
+        type: array
+        items:
+          type: object
+      summary:
+        type: object
+
+responses:
+  BadRequestError:
+    description: Bad request
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"
+  UnauthorizedError:
+    description: Unauthorized
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"
+  ForbiddenError:
+    description: Forbidden
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"
+  NotFoundError:
+    description: Not found
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"
+  ConflictError:
+    description: Conflict
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"
+  InternalServerError:
+    description: Internal server error
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/ApiError"

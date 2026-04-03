@@ -1,0 +1,1897 @@
+/api/health:
+  get:
+    tags:
+      - Health
+    summary: Health check
+    responses:
+      "200":
+        description: API is healthy
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                message:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/v1/auth/login:
+  post:
+    tags:
+      - Authentication
+    summary: POST /api/v1/auth/login
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Login"
+/api/v1/auth/verify-number:
+  post:
+    tags:
+      - Authentication
+    summary: POST /api/v1/auth/verify-number
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/VerifyPhoneNumber"
+/api/v1/auth/resend-otp:
+  post:
+    tags:
+      - Authentication
+    summary: POST /api/v1/auth/resend-otp
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResendOtpRequest"
+/api/v1/auth/reset-password:
+  post:
+    tags:
+      - Authentication
+    summary: POST /api/v1/auth/reset-password
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResetPasswordOtpRequest"
+  patch:
+    tags:
+      - Authentication
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ResetPassword"
+/api/v1/auth/unlock-account:
+  post:
+    tags:
+      - Authentication
+    summary: POST /api/v1/auth/unlock-account
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RequestUnlockAccountOtp"
+  patch:
+    tags:
+      - Authentication
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/UnlockAccount"
+/api/v1/auth/profile:
+  get:
+    tags:
+      - Authentication
+    summary: Get authenticated profile
+    responses:
+      "200":
+        description: Profile retrieved
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserProfileResponse"
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "401":
+        $ref: "#/components/responses/UnauthorizedError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    security:
+      - bearerAuth: []
+/api/v1/auth/user/{user_id}/{garage_id}:
+  get:
+    tags:
+      - Authentication
+    summary: Get user details in garage context
+    responses:
+      "200":
+        description: User details retrieved
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserDetailResponse"
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "401":
+        $ref: "#/components/responses/UnauthorizedError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: garage_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: fromDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+      - name: toDate
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date
+    security:
+      - bearerAuth: []
+/api/users:
+  post:
+    tags:
+      - Users
+    summary: POST /api/users
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Users
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/users/{id}:
+  get:
+    tags:
+      - Users
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Users
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Users
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/user-roles:
+  post:
+    tags:
+      - User Roles
+    summary: POST /api/user-roles
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - User Roles
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/user-roles/{id}:
+  get:
+    tags:
+      - User Roles
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - User Roles
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - User Roles
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/locations:
+  post:
+    tags:
+      - Locations
+    summary: POST /api/locations
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Locations
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/locations/{id}:
+  get:
+    tags:
+      - Locations
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Locations
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Locations
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/skills/staff:
+  post:
+    tags:
+      - Skills
+    summary: POST /api/skills/staff
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+/api/skills/staff/all:
+  get:
+    tags:
+      - Skills
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/skills/staff/{id}:
+  get:
+    tags:
+      - Skills
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Skills
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Skills
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/skills:
+  post:
+    tags:
+      - Skills
+    summary: POST /api/skills
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Skills
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/skills/{id}:
+  get:
+    tags:
+      - Skills
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Skills
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Skills
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/certifications:
+  post:
+    tags:
+      - Certifications
+    summary: POST /api/certifications
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Certifications
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/certifications/{id}:
+  get:
+    tags:
+      - Certifications
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Certifications
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Certifications
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/availabilities:
+  post:
+    tags:
+      - Availabilities
+    summary: POST /api/availabilities
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+/api/availabilities/user/{userId}:
+  get:
+    tags:
+      - Availabilities
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Availabilities
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+/api/preferences/staff:
+  post:
+    tags:
+      - Preferences
+    summary: POST /api/preferences/staff
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+/api/preferences/staff/user/{userId}:
+  get:
+    tags:
+      - Preferences
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+/api/preferences/notifications:
+  post:
+    tags:
+      - Preferences
+    summary: POST /api/preferences/notifications
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+/api/preferences/notifications/user/{userId}:
+  get:
+    tags:
+      - Preferences
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+/api/schedules:
+  post:
+    tags:
+      - Schedules
+    summary: POST /api/schedules
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Schedules
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/schedules/{id}:
+  get:
+    tags:
+      - Schedules
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Schedules
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Schedules
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/schedules/{id}/publish:
+  post:
+    tags:
+      - Schedules
+    summary: POST /api/schedules/{id}/publish
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/schedules/{id}/unpublish:
+  post:
+    tags:
+      - Schedules
+    summary: POST /api/schedules/{id}/unpublish
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/shifts:
+  post:
+    tags:
+      - Shifts
+    summary: POST /api/shifts
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Shifts
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/shifts/{id}:
+  get:
+    tags:
+      - Shifts
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Shifts
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Shifts
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/assignments:
+  post:
+    tags:
+      - Assignments
+    summary: POST /api/assignments
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Assignments
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/assignments/{id}:
+  get:
+    tags:
+      - Assignments
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Assignments
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Assignments
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/swap-requests:
+  post:
+    tags:
+      - Swap Requests
+    summary: POST /api/swap-requests
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Swap Requests
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/swap-requests/{id}:
+  get:
+    tags:
+      - Swap Requests
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Swap Requests
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Swap Requests
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/swap-requests/{id}/cancel:
+  post:
+    tags:
+      - Swap Requests
+    summary: POST /api/swap-requests/{id}/cancel
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/swap-requests/{id}/manager-decision:
+  post:
+    tags:
+      - Swap Requests
+    summary: POST /api/swap-requests/{id}/manager-decision
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/labor-alerts:
+  post:
+    tags:
+      - Labor Alerts
+    summary: POST /api/labor-alerts
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Labor Alerts
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/labor-alerts/{id}:
+  get:
+    tags:
+      - Labor Alerts
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Labor Alerts
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Labor Alerts
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/fairness-snapshots:
+  post:
+    tags:
+      - Fairness Snapshots
+    summary: POST /api/fairness-snapshots
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Fairness Snapshots
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/fairness-snapshots/{id}:
+  get:
+    tags:
+      - Fairness Snapshots
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Fairness Snapshots
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Fairness Snapshots
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/notifications:
+  post:
+    tags:
+      - Notifications
+    summary: POST /api/notifications
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Notifications
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/notifications/{id}:
+  get:
+    tags:
+      - Notifications
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Notifications
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Notifications
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/notifications/{id}/read:
+  post:
+    tags:
+      - Notifications
+    summary: POST /api/notifications/{id}/read
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/clock-events:
+  post:
+    tags:
+      - Clock Events
+    summary: POST /api/clock-events
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Clock Events
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+/api/clock-events/{id}:
+  get:
+    tags:
+      - Clock Events
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  patch:
+    tags:
+      - Clock Events
+    summary: Update resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+  delete:
+    tags:
+      - Clock Events
+    summary: Delete resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+/api/audit-logs:
+  post:
+    tags:
+      - Audit Logs
+    summary: POST /api/audit-logs
+    responses:
+      "201":
+        description: Created
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+  get:
+    tags:
+      - Audit Logs
+    summary: Get resource
+    responses:
+      "200":
+        description: Success
+      "400":
+        $ref: "#/components/responses/BadRequestError"
+      "404":
+        $ref: "#/components/responses/NotFoundError"
+      "500":
+        $ref: "#/components/responses/InternalServerError"

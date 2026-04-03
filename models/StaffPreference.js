@@ -31,6 +31,4 @@ const staffPreferenceSchema = new Schema(
   }
 );
 
-staffPreferenceSchema.index({ user_id: 1 });
-
 export default mongoose.model("staff_preferences", staffPreferenceSchema);

@@ -34,8 +34,6 @@ const notificationPreferenceSchema = new Schema(
   }
 );
 
-notificationPreferenceSchema.index({ user_id: 1 });
-
 export default mongoose.model(
   "notification_preferences",
   notificationPreferenceSchema
