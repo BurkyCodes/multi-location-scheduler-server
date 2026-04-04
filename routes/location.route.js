@@ -6,13 +6,15 @@ import {
   getLocations,
   updateLocation,
 } from "../controllers/location.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
+import { requireManager } from "../middlewares/role.middleware.js";
 
 const router = Router();
 
-router.post("/", createLocation);
-router.get("/", getLocations);
-router.get("/:id", getLocationById);
-router.patch("/:id", updateLocation);
-router.delete("/:id", deleteLocation);
+router.get("/", checkAuthentication, getLocations);
+router.get("/:id", checkAuthentication, getLocationById);
+router.post("/", checkAuthentication, requireManager, createLocation);
+router.patch("/:id", checkAuthentication, requireManager, updateLocation);
+router.delete("/:id", checkAuthentication, requireManager, deleteLocation);
 
 export default router;

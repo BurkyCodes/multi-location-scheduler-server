@@ -8,15 +8,22 @@ import {
   managerDecisionSwapRequest,
   updateSwapRequest,
 } from "../controllers/swapRequest.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
+import { requireManager } from "../middlewares/role.middleware.js";
 
 const router = Router();
 
-router.post("/", createSwapRequest);
-router.get("/", getSwapRequests);
-router.get("/:id", getSwapRequestById);
-router.patch("/:id", updateSwapRequest);
-router.delete("/:id", deleteSwapRequest);
-router.post("/:id/cancel", cancelSwapRequest);
-router.post("/:id/manager-decision", managerDecisionSwapRequest);
+router.post("/", checkAuthentication, createSwapRequest);
+router.get("/", checkAuthentication, getSwapRequests);
+router.get("/:id", checkAuthentication, getSwapRequestById);
+router.patch("/:id", checkAuthentication, updateSwapRequest);
+router.delete("/:id", checkAuthentication, deleteSwapRequest);
+router.post("/:id/cancel", checkAuthentication, cancelSwapRequest);
+router.post(
+  "/:id/manager-decision",
+  checkAuthentication,
+  requireManager,
+  managerDecisionSwapRequest
+);
 
 export default router;

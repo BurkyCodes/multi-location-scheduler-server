@@ -19,6 +19,7 @@ const signRefreshToken = (payload) =>
   jwt.sign(payload, process.env.LOGIN_SECRET, { expiresIn: "30d" });
 
 const generateOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const setUserOtp = (user, type) => {
   const otp = generateOtp();
@@ -51,7 +52,7 @@ export const gmsRegistration = asyncHandler(async (req, res) => {
     country_code,
     name,
     email,
-    status: [],
+    status: "active",
   });
 
   const otp = setUserOtp(user, "verification");
@@ -65,11 +66,11 @@ export const gmsRegistration = asyncHandler(async (req, res) => {
 });
 
 export const userLogin = asyncHandler(async (req, res) => {
-  const { phone_number, password } = req.body;
+  const { email, phone_number, password } = req.body;
 
-  if (!phone_number || !password) {
+  if ((!phone_number && !email) || !password) {
     return res.status(400).json({
-      message: "phone_number and password are required",
+      message: "Provide email or phone_number, and password",
     });
   }
 
@@ -79,15 +80,23 @@ export const userLogin = asyncHandler(async (req, res) => {
     });
   }
 
-  const existingUser = await User.findOne({ phone_number }).select("+password");
+  const existingUser = await User.findOne({
+    ...(phone_number
+      ? { phone_number }
+      : { email: new RegExp(`^${escapeRegex(email)}$`, "i") }),
+  }).select("+password");
 
   if (!existingUser) {
     return res.status(404).json({
-      message: `User with phone number ${phone_number} does not exist`,
+      message: "User does not exist",
     });
   }
 
-  if (existingUser.status.includes("account_locked")) {
+  if (existingUser.status === "deactivated") {
+    return res.status(403).json({ message: "Your account is deactivated" });
+  }
+
+  if (existingUser.failed_attempts >= LOGIN_ATTEMPT_LIMIT) {
     return res.status(401).json({ message: "Your account is locked" });
   }
 
@@ -133,9 +142,6 @@ export const userLogin = asyncHandler(async (req, res) => {
     );
 
     if (existingUser.failed_attempts >= LOGIN_ATTEMPT_LIMIT) {
-      if (!existingUser.status.includes("account_locked")) {
-        existingUser.status.push("account_locked");
-      }
       await existingUser.save();
       return res.status(401).json({ message: "Your account has been locked" });
     }
@@ -163,6 +169,20 @@ export const userLogin = asyncHandler(async (req, res) => {
     accessToken,
     refreshToken,
   });
+});
+
+export const userLogout = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.userId);
+
+  if (!user) {
+    return res.status(404).json({ message: "User does not exist" });
+  }
+
+  user.access_token = null;
+  user.refresh_token = null;
+  await user.save();
+
+  return res.status(200).json({ message: "Successfully logged out" });
 });
 
 export const verifyPhoneNumber = asyncHandler(async (req, res) => {
@@ -285,7 +305,6 @@ export const resetPassword = asyncHandler(async (req, res) => {
   user.password = await bcrypt.hash(new_password, 12);
   user.is_pin_set = true;
   user.failed_attempts = 0;
-  user.status = user.status.filter((item) => item !== "account_locked");
   clearUserOtp(user);
   await user.save();
 
@@ -348,7 +367,6 @@ export const unlockAccount = asyncHandler(async (req, res) => {
   }
 
   user.failed_attempts = 0;
-  user.status = user.status.filter((item) => item !== "account_locked");
   clearUserOtp(user);
   await user.save();
 
@@ -364,7 +382,10 @@ export const unlockAccount = asyncHandler(async (req, res) => {
 });
 
 export const getAuthenticatedProfile = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.userId);
+  const user = await User.findById(req.userId).populate({
+    path: "role_id",
+    select: "role",
+  });
   if (!user) {
     return res.status(404).json({ message: "User not found" });
   }

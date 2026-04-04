@@ -9,6 +9,7 @@ import {
   resetPassword,
   unlockAccount,
   userLogin,
+  userLogout,
   verifyPhoneNumber,
 } from "../controllers/auth.controller.js";
 import { checkAuthentication } from "../middlewares/auth.middleware.js";
@@ -17,6 +18,7 @@ const router = Router();
 
 router.post("/gms", gmsRegistration);
 router.post("/login", userLogin);
+router.post("/logout", checkAuthentication, userLogout);
 router.post("/verify-number", verifyPhoneNumber);
 router.post("/resend-otp", resendOtp);
 router.post("/reset-password", requestResetPasswordOtp);

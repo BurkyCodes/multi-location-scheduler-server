@@ -6,13 +6,15 @@ import {
   getShifts,
   updateShift,
 } from "../controllers/shift.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
+import { requireManager } from "../middlewares/role.middleware.js";
 
 const router = Router();
 
-router.post("/", createShift);
-router.get("/", getShifts);
-router.get("/:id", getShiftById);
-router.patch("/:id", updateShift);
-router.delete("/:id", deleteShift);
+router.get("/", checkAuthentication, getShifts);
+router.get("/:id", checkAuthentication, getShiftById);
+router.post("/", checkAuthentication, requireManager, createShift);
+router.patch("/:id", checkAuthentication, requireManager, updateShift);
+router.delete("/:id", checkAuthentication, requireManager, deleteShift);
 
 export default router;

@@ -14,6 +14,14 @@ const userSchema = Schema(
     country_code: {
       type: String,
       required: false,
+      trim: true,
+      validate: {
+        validator(value) {
+          if (!value) return true;
+          return /^\+\d{1,4}$/.test(value);
+        },
+        message: "country_code must be in international format like +1",
+      },
     },
     phone_number: {
       type: String,
@@ -34,8 +42,9 @@ const userSchema = Schema(
       min: 0,
     },
     status: {
-      type: [String],
-      default: [],
+      type: String,
+      enum: ["active", "deactivated"],
+      default: "active",
     },
     access_token: {
       type: String,
@@ -78,6 +87,10 @@ const userSchema = Schema(
     is_active: {
       type: Boolean,
       default: true,
+    },
+    assignment_lock_until: {
+      type: Date,
+      required: false,
     },
   },
   {

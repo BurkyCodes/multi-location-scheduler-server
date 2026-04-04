@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 const { Schema } = mongoose;
+const MAX_LOCATIONS = 4;
 
 const locationSchema = new Schema(
   {
@@ -39,5 +40,28 @@ const locationSchema = new Schema(
 );
 
 locationSchema.index({ code: 1 }, { unique: true });
+
+locationSchema.pre("save", async function enforceMaxLocations() {
+  if (!this.isNew) {
+    return;
+  }
+
+  const currentCount = await this.constructor.countDocuments();
+  if (currentCount >= MAX_LOCATIONS) {
+    throw new Error(`A maximum of ${MAX_LOCATIONS} locations is allowed`);
+  }
+});
+
+locationSchema.pre("insertMany", async function enforceMaxLocationsBulk(docs) {
+  const incomingDocs = Array.isArray(docs) ? docs.length : 0;
+  if (incomingDocs === 0) {
+    return;
+  }
+
+  const currentCount = await this.countDocuments();
+  if (currentCount + incomingDocs > MAX_LOCATIONS) {
+    throw new Error(`A maximum of ${MAX_LOCATIONS} locations is allowed`);
+  }
+});
 
 export default mongoose.model("locations", locationSchema);

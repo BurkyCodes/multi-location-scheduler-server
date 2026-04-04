@@ -27,6 +27,46 @@ const managerOverrideSchema = new Schema(
   { _id: false }
 );
 
+const assignmentActivitySchema = new Schema(
+  {
+    type: {
+      type: String,
+      enum: ["assigned", "clock_in", "clock_out", "pause", "resume", "note", "unassigned"],
+      required: true,
+    },
+    actor_user_id: {
+      type: Schema.Types.ObjectId,
+      ref: "users",
+    },
+    note: {
+      type: String,
+      trim: true,
+    },
+    at_utc: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const workSessionSchema = new Schema(
+  {
+    clock_in_utc: {
+      type: Date,
+      required: true,
+    },
+    clock_out_utc: {
+      type: Date,
+    },
+    duration_minutes: {
+      type: Number,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
 const shiftAssignmentSchema = new Schema(
   {
     shift_id: {
@@ -57,6 +97,14 @@ const shiftAssignmentSchema = new Schema(
     manager_override: {
       type: managerOverrideSchema,
       default: () => ({}),
+    },
+    activity_log: {
+      type: [assignmentActivitySchema],
+      default: [],
+    },
+    work_sessions: {
+      type: [workSessionSchema],
+      default: [],
     },
   },
   {

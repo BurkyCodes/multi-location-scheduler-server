@@ -39,18 +39,20 @@ schemas:
   Login:
     type: object
     required:
-      - phone_number
       - password
+    anyOf:
+      - required: [phone_number]
+      - required: [email]
     properties:
+      email:
+        type: string
+        example: "staff1@example.com"
       phone_number:
         type: string
         example: "254712345678"
       password:
         type: string
         example: "StrongPass@123"
-      organization_id:
-        type: string
-        example: "org_123"
 
   VerifyPhoneNumber:
     type: object
