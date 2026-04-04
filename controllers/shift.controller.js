@@ -27,9 +27,28 @@ const normalizeShiftTimes = (startsAtUtc, endsAtUtc) => {
   }
   return { starts_at_utc: start, ends_at_utc: end };
 };
+const TIMEZONE_ALIASES = {
+  "Africa/DaresSalaam": "Africa/Dar_es_Salaam",
+  "Africa/DarEsSalaam": "Africa/Dar_es_Salaam",
+  "Africa/Dar es Salaam": "Africa/Dar_es_Salaam",
+};
+const isValidTimezone = (timezone) => {
+  if (!timezone) return false;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+const normalizeTimezone = (timezone) => {
+  const alias = TIMEZONE_ALIASES[timezone] || timezone;
+  if (isValidTimezone(alias)) return alias;
+  return "Africa/Nairobi";
+};
 const formatInTimezone = (dateValue, timezone) =>
   new Intl.DateTimeFormat("en-GB", {
-    timeZone: timezone,
+    timeZone: normalizeTimezone(timezone),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -39,10 +58,12 @@ const formatInTimezone = (dateValue, timezone) =>
   }).format(new Date(dateValue));
 const toShiftResponse = (shift) => {
   const data = shift.toObject ? shift.toObject() : shift;
+  const safeTimezone = normalizeTimezone(data.location_timezone);
   return {
     ...data,
-    starts_at_local: formatInTimezone(data.starts_at_utc, data.location_timezone),
-    ends_at_local: formatInTimezone(data.ends_at_utc, data.location_timezone),
+    location_timezone: safeTimezone,
+    starts_at_local: formatInTimezone(data.starts_at_utc, safeTimezone),
+    ends_at_local: formatInTimezone(data.ends_at_utc, safeTimezone),
   };
 };
 
@@ -126,7 +147,7 @@ export const createShift = asyncHandler(async (req, res) => {
     required_skill_id,
     starts_at_utc: normalizedTimes.starts_at_utc,
     ends_at_utc: normalizedTimes.ends_at_utc,
-    location_timezone: location.timezone,
+    location_timezone: normalizeTimezone(location.timezone),
     headcount_required,
     is_premium,
     status,
@@ -225,6 +246,9 @@ export const updateShift = asyncHandler(async (req, res) => {
   }
 
   const updateData = { ...req.body, updated_by: req.userId };
+  if (Object.prototype.hasOwnProperty.call(updateData, "location_timezone")) {
+    delete updateData.location_timezone;
+  }
   const nextLocationId = updateData.location_id || shift.location_id;
   if (!hasLocationAccess(req.authUser, nextLocationId)) {
     return res.status(403).json({
@@ -266,7 +290,9 @@ export const updateShift = asyncHandler(async (req, res) => {
         message: "Shift location_id must match schedule location_id",
       });
     }
-    updateData.location_timezone = location.timezone;
+    updateData.location_timezone = normalizeTimezone(location.timezone);
+  } else {
+    updateData.location_timezone = normalizeTimezone(shift.location_timezone);
   }
 
   const updated = await Shift.findByIdAndUpdate(req.params.id, updateData, {

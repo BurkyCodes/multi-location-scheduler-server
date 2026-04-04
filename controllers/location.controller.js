@@ -51,7 +51,7 @@ export const createLocation = asyncHandler(async (req, res) => {
     });
   }
 
-  const location = await Location.create(req.body);
+  const location = await Location.create({ ...req.body, timezone });
   return res.status(201).json({ success: true, data: location });
 });
 
@@ -135,7 +135,7 @@ export const updateLocation = asyncHandler(async (req, res) => {
     });
   }
 
-  const updated = await Location.findByIdAndUpdate(req.params.id, req.body, {
+  const updated = await Location.findByIdAndUpdate(req.params.id, { ...req.body, timezone }, {
     new: true,
     runValidators: true,
   });
