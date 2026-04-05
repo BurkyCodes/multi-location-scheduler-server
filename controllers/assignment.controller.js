@@ -9,6 +9,7 @@ import Availability from "../models/Availability.js";
 import ClockEvent from "../models/ClockEvent.js";
 import SwapRequest from "../models/SwapRequest.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { sendUserNotification } from "../services/notificationEvents.service.js";
 import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
@@ -1301,6 +1302,18 @@ export const createAssignment = asyncHandler(async (req, res) => {
       "shift_id user_id assigned_by manager_override.approved_by"
     );
 
+    await sendUserNotification({
+      user_id: user_id,
+      title: "New shift assignment",
+      message: "You have been assigned a new shift.",
+      category: "shift_assigned",
+      priority: "high",
+      data: {
+        assignment_id: assignment._id.toString(),
+        shift_id: shift_id.toString(),
+      },
+    });
+
     return res.status(201).json({ success: true, data: populated });
   } finally {
     await releaseUserAssignmentLock(assignedUser._id);
@@ -1501,6 +1514,20 @@ export const updateAssignment = asyncHandler(async (req, res) => {
         runValidators: true,
       }
     ).populate("shift_id user_id assigned_by manager_override.approved_by");
+
+    if (String(nextUserId) !== String(assignment.user_id)) {
+      await sendUserNotification({
+        user_id: nextUserId,
+        title: "Shift reassigned to you",
+        message: "A shift has been reassigned to you.",
+        category: "shift_assigned",
+        priority: "high",
+        data: {
+          assignment_id: updated._id.toString(),
+          shift_id: shift._id.toString(),
+        },
+      });
+    }
 
     return res.json({ success: true, data: updated });
   } finally {

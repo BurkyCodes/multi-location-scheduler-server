@@ -2,6 +2,10 @@ import Schedule from "../models/Schedule.js";
 import Shift from "../models/Shift.js";
 import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import {
+  getActiveUsersByRole,
+  sendBulkNotifications,
+} from "../services/notificationEvents.service.js";
 
 const normalizeWeekStartDate = (value) => {
   const date = new Date(value);
@@ -74,6 +78,21 @@ export const createSchedule = asyncHandler(async (req, res) => {
     edit_cutoff_hours,
     status: "draft",
   });
+
+  const admins = await getActiveUsersByRole("admin");
+  await sendBulkNotifications(
+    admins.map((item) => item._id),
+    {
+      title: "New schedule created",
+      message: "A new schedule has been created and is ready for review.",
+      category: "schedule_created",
+      priority: "normal",
+      data: {
+        schedule_id: schedule._id.toString(),
+        location_id: location_id.toString(),
+      },
+    }
+  );
 
   return res.status(201).json({ success: true, data: schedule });
 });

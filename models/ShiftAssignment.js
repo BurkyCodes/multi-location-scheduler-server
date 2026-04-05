@@ -153,6 +153,10 @@ const shiftAssignmentSchema = new Schema(
       type: [pauseEntrySchema],
       default: [],
     },
+    reminder_30min_sent_at: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

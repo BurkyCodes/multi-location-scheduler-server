@@ -4,6 +4,11 @@ import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { createCrudController } from "./crud.controller.js";
 import { evaluateAssignmentRules } from "./assignment.controller.js";
+import {
+  getActiveManagersForLocation,
+  sendBulkNotifications,
+  sendUserNotification,
+} from "../services/notificationEvents.service.js";
 
 const swapController = createCrudController(SwapRequest, {
   populate:
@@ -26,7 +31,124 @@ const isExpired = (swapRequest) =>
 
 const toId = (value) => (value ? value.toString() : null);
 
-export const createSwapRequest = swapController.createOne;
+export const createSwapRequest = asyncHandler(async (req, res) => {
+  const {
+    type = "swap",
+    requester_id,
+    from_assignment_id,
+    target_user_id,
+    requested_assignment_id,
+    expires_at,
+    note,
+  } = req.body;
+
+  if (!requester_id || !from_assignment_id) {
+    return res.status(400).json({
+      success: false,
+      message: "requester_id and from_assignment_id are required",
+    });
+  }
+
+  if (req.userId && toId(req.userId) !== toId(requester_id)) {
+    return res.status(403).json({
+      success: false,
+      message: "You can only create swap requests for yourself",
+    });
+  }
+
+  const fromAssignment = await ShiftAssignment.findById(from_assignment_id).populate(
+    assignmentShiftPopulate
+  );
+  if (!fromAssignment || !fromAssignment.shift_id) {
+    return res.status(404).json({
+      success: false,
+      message: "Original assignment or shift not found",
+    });
+  }
+
+  if (toId(fromAssignment.user_id) !== toId(requester_id)) {
+    return res.status(409).json({
+      success: false,
+      message: "Only the owner of the original assignment can request a swap",
+    });
+  }
+
+  const doc = await SwapRequest.create({
+    type,
+    requester_id,
+    from_assignment_id,
+    target_user_id,
+    requested_assignment_id,
+    expires_at,
+    note,
+    status: "pending_peer_acceptance",
+  });
+
+  const shift = fromAssignment.shift_id;
+
+  let candidateUsers = [];
+  if (target_user_id) {
+    const target = await getUserWithRole(target_user_id);
+    if (target && target.role_id?.role === "staff") {
+      candidateUsers = [target];
+    }
+  } else {
+    const users = await User.find({
+      _id: { $ne: requester_id },
+      status: "active",
+      is_active: true,
+    }).populate({ path: "role_id", select: "role" });
+
+    const staffCandidates = users.filter((item) => item.role_id?.role === "staff");
+    for (const candidate of staffCandidates) {
+      const violations = await evaluateAssignmentRules({
+        user: candidate,
+        shift,
+        excludeAssignmentId: fromAssignment._id,
+      });
+      if (!violations.length) {
+        candidateUsers.push(candidate);
+      }
+    }
+  }
+
+  await sendBulkNotifications(
+    candidateUsers.map((item) => item._id),
+    {
+      title: "Swap request available",
+      message: "A staff swap request is available for a shift you can take.",
+      category: "swap_requested",
+      priority: "normal",
+      data: {
+        swap_request_id: doc._id.toString(),
+        from_assignment_id: from_assignment_id.toString(),
+        shift_id: shift._id.toString(),
+      },
+    }
+  );
+
+  const managers = await getActiveManagersForLocation(shift.location_id);
+  await sendBulkNotifications(
+    managers.map((item) => item._id),
+    {
+      title: "New swap request submitted",
+      message: "A new swap request has been submitted for your location.",
+      category: "swap_requested",
+      priority: "normal",
+      data: {
+        swap_request_id: doc._id.toString(),
+        from_assignment_id: from_assignment_id.toString(),
+        shift_id: shift._id.toString(),
+      },
+    }
+  );
+
+  const populated = await SwapRequest.findById(doc._id).populate(
+    "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id"
+  );
+
+  return res.status(201).json({ success: true, data: populated });
+});
 export const deleteSwapRequest = swapController.deleteById;
 
 export const updateSwapRequest = asyncHandler(async (req, res) => {
@@ -241,6 +363,18 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
   swapRequest.status = "pending_manager_approval";
   await swapRequest.save();
 
+  await sendUserNotification({
+    user_id: swapRequest.requester_id,
+    title: "Swap request accepted",
+    message: "Your swap request was accepted and is waiting for manager approval.",
+    category: "swap_updated",
+    priority: "normal",
+    data: {
+      swap_request_id: swapRequest._id.toString(),
+      accepted_by_user_id: currentUser._id.toString(),
+    },
+  });
+
   return res.json({ success: true, data: swapRequest });
 });
 
@@ -289,6 +423,15 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     swapRequest.status = "rejected";
     swapRequest.manager_id = manager_id || req.userId;
     await swapRequest.save();
+    await sendBulkNotifications([swapRequest.requester_id, swapRequest.claimed_by_user_id], {
+      title: "Swap request rejected",
+      message: "A manager rejected the swap request.",
+      category: "swap_updated",
+      priority: "normal",
+      data: {
+        swap_request_id: swapRequest._id.toString(),
+      },
+    });
     return res.json({ success: true, data: swapRequest });
   }
 
@@ -435,6 +578,29 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   swapRequest.status = "approved";
   swapRequest.manager_id = actorId;
   await swapRequest.save();
+
+  await sendUserNotification({
+    user_id: requesterUser._id,
+    title: "Swap request approved",
+    message: "Your swap request was approved.",
+    category: "swap_updated",
+    priority: "high",
+    data: {
+      swap_request_id: swapRequest._id.toString(),
+      assignment_id: fromAssignment._id.toString(),
+    },
+  });
+  await sendUserNotification({
+    user_id: incomingUser._id,
+    title: "Shift assigned via swap",
+    message: "A manager approved the swap and assigned the shift to you.",
+    category: "shift_assigned",
+    priority: "high",
+    data: {
+      swap_request_id: swapRequest._id.toString(),
+      assignment_id: fromAssignment._id.toString(),
+    },
+  });
 
   const refreshedFromAssignment = await ShiftAssignment.findById(fromAssignment._id).populate(
     "shift_id user_id assigned_by manager_override.approved_by"

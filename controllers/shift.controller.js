@@ -5,6 +5,10 @@ import Skill from "../models/Skill.js";
 import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import {
+  getActiveUsersByRole,
+  sendBulkNotifications,
+} from "../services/notificationEvents.service.js";
+import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
   toIanaTimezone,
@@ -151,6 +155,22 @@ export const createShift = asyncHandler(async (req, res) => {
 
   const populated = await Shift.findById(shift._id).populate(
     "schedule_id location_id required_skill_id created_by updated_by"
+  );
+
+  const admins = await getActiveUsersByRole("admin");
+  await sendBulkNotifications(
+    admins.map((item) => item._id),
+    {
+      title: "New shift created",
+      message: "A new shift has been created on the schedule.",
+      category: "shift_created",
+      priority: "normal",
+      data: {
+        shift_id: shift._id.toString(),
+        schedule_id: schedule_id.toString(),
+        location_id: location_id.toString(),
+      },
+    }
   );
 
   return res.status(201).json({ success: true, data: toShiftResponse(populated) });

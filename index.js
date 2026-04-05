@@ -3,6 +3,7 @@ import connectDB from "./config/db.js";
 import { createApp } from "./app.js";
 import seedDatabaseIfNeeded from "./utils/seedData.js";
 import migrateUserStatus from "./utils/migrateUserStatus.js";
+import { startShiftReminderJob } from "./utils/shiftReminderJob.js";
 
 dotenv.config();
 
@@ -14,6 +15,7 @@ const startServer = async () => {
     await connectDB();
     await migrateUserStatus();
     await seedDatabaseIfNeeded();
+    startShiftReminderJob();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
