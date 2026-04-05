@@ -517,7 +517,7 @@ const getAssignedShifts = async (userId, excludeAssignmentId = null) => {
   return assignments.map((entry) => entry.shift_id).filter(Boolean);
 };
 
-const evaluateAssignmentRules = async ({ user, shift, excludeAssignmentId = null }) => {
+export const evaluateAssignmentRules = async ({ user, shift, excludeAssignmentId = null }) => {
   const violations = [];
 
   if (user.status !== "active" || user.is_active === false) {

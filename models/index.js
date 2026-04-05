@@ -14,5 +14,6 @@ export { default as LaborAlert } from "./LaborAlert.js";
 export { default as FairnessSnapshot } from "./FairnessSnapshot.js";
 export { default as NotificationPreference } from "./NotificationPreference.js";
 export { default as Notification } from "./Notification.js";
+export { default as DeviceToken } from "./DeviceToken.js";
 export { default as ClockEvent } from "./ClockEvent.js";
 export { default as AuditLog } from "./AuditLog.js";

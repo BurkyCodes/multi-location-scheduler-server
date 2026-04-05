@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  acceptSwapRequest,
   cancelSwapRequest,
   createSwapRequest,
   deleteSwapRequest,
@@ -19,6 +20,7 @@ router.get("/:id", checkAuthentication, getSwapRequestById);
 router.patch("/:id", checkAuthentication, updateSwapRequest);
 router.delete("/:id", checkAuthentication, deleteSwapRequest);
 router.post("/:id/cancel", checkAuthentication, cancelSwapRequest);
+router.post("/:id/accept", checkAuthentication, acceptSwapRequest);
 router.post(
   "/:id/manager-decision",
   checkAuthentication,

@@ -1,9 +1,7 @@
 import UserRole from "../models/UserRole.js";
 import { createCrudController } from "./crud.controller.js";
 
-const userRoleController = createCrudController(UserRole, {
-  populate: "user_id location_ids",
-});
+const userRoleController = createCrudController(UserRole);
 
 export const createUserRole = userRoleController.createOne;
 export const getUserRoles = userRoleController.getAll;

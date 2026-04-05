@@ -19,13 +19,22 @@ const ensureSeeded = async (Model, createDocs) => {
 
 const cycle = (items, index) => items[index % items.length];
 
+const ensureBaseRoles = async () => {
+  const requiredRoles = ["admin", "manager", "staff"];
+  const existingRoles = await UserRole.find({ role: { $in: requiredRoles } }).select("role");
+  const existingRoleSet = new Set(existingRoles.map((item) => item.role));
+  const missingRoles = requiredRoles
+    .filter((role) => !existingRoleSet.has(role))
+    .map((role) => ({ role }));
+
+  if (missingRoles.length) {
+    await UserRole.insertMany(missingRoles);
+  }
+};
+
 const seedDatabaseIfNeeded = async () => {
-  // Keep role bootstrap only so seeded users are immediately usable in-app.
-  await ensureSeeded(UserRole, () => [
-    { role: "admin" },
-    { role: "manager" },
-    { role: "staff" },
-  ]);
+  // Always backfill required roles, even when one or two already exist.
+  await ensureBaseRoles();
 
   const roles = await UserRole.find().sort({ createdAt: 1 });
   const roleByName = new Map(roles.map((role) => [role.role, role]));

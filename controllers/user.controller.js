@@ -24,8 +24,8 @@ const validateLocationAssignmentForRole = (roleName, locationIds) => {
   }
 
   const count = Array.isArray(locationIds) ? locationIds.length : 0;
-  if (roleName === "manager" && count !== 1) {
-    return "Managers must be assigned to exactly one location";
+  if (roleName === "manager" && count < 1) {
+    return "Managers must be assigned to at least one location";
   }
 
   if (roleName === "staff" && count !== 1) {
@@ -48,13 +48,6 @@ export const createUser = asyncHandler(async (req, res) => {
   const role = await UserRole.findById(role_id).select("role");
   if (!role) {
     return res.status(404).json({ success: false, message: "Role not found" });
-  }
-
-  if (role.role !== "staff") {
-    return res.status(400).json({
-      success: false,
-      message: "This endpoint is for creating staff members only",
-    });
   }
 
   const locationValidationError = validateLocationAssignmentForRole(
