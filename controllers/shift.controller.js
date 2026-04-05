@@ -4,6 +4,12 @@ import Location from "../models/Location.js";
 import Skill from "../models/Skill.js";
 import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import {
+  CANONICAL_TIMEZONES,
+  normalizeTimezone as normalizeSupportedTimezone,
+  toIanaTimezone,
+  toTimezoneLabel,
+} from "../utils/timezone.js";
 
 const isShiftLockedByCutoff = (shiftStartUtc, cutoffHours) => {
   const cutoffMoment = new Date(
@@ -27,28 +33,15 @@ const normalizeShiftTimes = (startsAtUtc, endsAtUtc) => {
   }
   return { starts_at_utc: start, ends_at_utc: end };
 };
-const TIMEZONE_ALIASES = {
-  "Africa/DaresSalaam": "Africa/Dar_es_Salaam",
-  "Africa/DarEsSalaam": "Africa/Dar_es_Salaam",
-  "Africa/Dar es Salaam": "Africa/Dar_es_Salaam",
-};
-const isValidTimezone = (timezone) => {
-  if (!timezone) return false;
-  try {
-    new Intl.DateTimeFormat("en-GB", { timeZone: timezone }).format(new Date());
-    return true;
-  } catch {
-    return false;
-  }
-};
 const normalizeTimezone = (timezone) => {
-  const alias = TIMEZONE_ALIASES[timezone] || timezone;
-  if (isValidTimezone(alias)) return alias;
-  return "Africa/Nairobi";
+  return normalizeSupportedTimezone(timezone, {
+    fallback: CANONICAL_TIMEZONES.EAST_AFRICA,
+    restrictToAllowed: true,
+  });
 };
 const formatInTimezone = (dateValue, timezone) =>
   new Intl.DateTimeFormat("en-GB", {
-    timeZone: normalizeTimezone(timezone),
+    timeZone: toIanaTimezone(normalizeTimezone(timezone)),
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -62,6 +55,7 @@ const toShiftResponse = (shift) => {
   return {
     ...data,
     location_timezone: safeTimezone,
+    location_timezone_label: toTimezoneLabel(safeTimezone),
     starts_at_local: formatInTimezone(data.starts_at_utc, safeTimezone),
     ends_at_local: formatInTimezone(data.ends_at_utc, safeTimezone),
   };

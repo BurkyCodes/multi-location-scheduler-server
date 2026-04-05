@@ -63,6 +63,35 @@ const workSessionSchema = new Schema(
       type: Number,
       min: 0,
     },
+    paused_minutes: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+  },
+  { _id: false }
+);
+
+const pauseEntrySchema = new Schema(
+  {
+    started_at_utc: {
+      type: Date,
+      required: true,
+    },
+    ended_at_utc: {
+      type: Date,
+      required: true,
+    },
+    reason: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    duration_minutes: {
+      type: Number,
+      min: 0,
+      required: true,
+    },
   },
   { _id: false }
 );
@@ -94,6 +123,11 @@ const shiftAssignmentSchema = new Schema(
       enum: ["assigned", "pending_manager_approval", "cancelled"],
       default: "assigned",
     },
+    work_status: {
+      type: String,
+      enum: ["not_started", "clocked_in", "paused", "clocked_out"],
+      default: "not_started",
+    },
     manager_override: {
       type: managerOverrideSchema,
       default: () => ({}),
@@ -104,6 +138,19 @@ const shiftAssignmentSchema = new Schema(
     },
     work_sessions: {
       type: [workSessionSchema],
+      default: [],
+    },
+    active_pause: {
+      started_at_utc: {
+        type: Date,
+      },
+      reason: {
+        type: String,
+        trim: true,
+      },
+    },
+    pause_history: {
+      type: [pauseEntrySchema],
       default: [],
     },
   },

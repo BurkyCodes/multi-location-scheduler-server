@@ -28,7 +28,21 @@ const shiftSchema = new Schema(
       required: [true, "Shift end is required"],
       validate: {
         validator(value) {
-          return value > this.starts_at_utc;
+          // During update validators (findOneAndUpdate/findByIdAndUpdate),
+          // `this` is a Query, not a document.
+          const startsAtRaw =
+            this instanceof mongoose.Query ? this.get("starts_at_utc") : this.starts_at_utc;
+          if (!startsAtRaw) {
+            return true;
+          }
+
+          const startsAt = new Date(startsAtRaw);
+          const endsAt = new Date(value);
+          if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+            return false;
+          }
+
+          return endsAt > startsAt;
         },
         message: "Shift end must be after shift start",
       },

@@ -26,6 +26,7 @@ router.patch("/reset-password", resetPassword);
 router.post("/unlock-account", requestUnlockAccountOtp);
 router.patch("/unlock-account", unlockAccount);
 router.get("/profile", checkAuthentication, getAuthenticatedProfile);
+router.get("/verify", checkAuthentication, getAuthenticatedProfile);
 router.get("/user/:user_id/:garage_id", checkAuthentication, getUserDetailsById);
 
 export default router;

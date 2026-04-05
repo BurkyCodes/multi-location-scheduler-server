@@ -1,20 +1,23 @@
 import Location from "../models/Location.js";
 import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import {
+  ALLOWED_LOCATION_TIMEZONES,
+  normalizeTimezone,
+  toTimezoneLabel,
+} from "../utils/timezone.js";
 
 const MAX_LOCATIONS = 4;
 const MAX_TIMEZONES = 2;
-const ALLOWED_TIMEZONES = ["Africa/Nairobi", "Africa/Dar_es_Salaam"];
-const EAST_AFRICA_ALIASES = {
-  "east africa": "Africa/Dar_es_Salaam",
-  "east-africa": "Africa/Dar_es_Salaam",
+
+const toLocationResponse = (location) => {
+  const data = location.toObject ? location.toObject() : location;
+  return {
+    ...data,
+    timezone_label: toTimezoneLabel(data.timezone),
+  };
 };
 
-const normalizeTimezone = (value) => {
-  const trimmed = (value || "").trim();
-  const aliasKey = trimmed.toLowerCase();
-  return EAST_AFRICA_ALIASES[aliasKey] || trimmed;
-};
 const hasLocationAccess = (user, locationId) => {
   if (!locationId) return false;
   return (user.location_ids || []).some((id) => id.toString() === locationId.toString());
@@ -32,11 +35,14 @@ export const createLocation = asyncHandler(async (req, res) => {
     });
   }
 
-  const timezone = normalizeTimezone(req.body.timezone);
-  if (timezone && !ALLOWED_TIMEZONES.includes(timezone)) {
+  const timezone = normalizeTimezone(req.body.timezone, {
+    fallback: "",
+    restrictToAllowed: true,
+  });
+  if (!timezone || !ALLOWED_LOCATION_TIMEZONES.includes(timezone)) {
     return res.status(400).json({
       success: false,
-      message: `Timezone must be one of: ${ALLOWED_TIMEZONES.join(", ")}`,
+      message: `Timezone must be one of: ${ALLOWED_LOCATION_TIMEZONES.join(", ")}`,
     });
   }
   const distinctTimezones = (await Location.distinct("timezone")).filter(Boolean);
@@ -52,7 +58,7 @@ export const createLocation = asyncHandler(async (req, res) => {
   }
 
   const location = await Location.create({ ...req.body, timezone });
-  return res.status(201).json({ success: true, data: location });
+  return res.status(201).json({ success: true, data: toLocationResponse(location) });
 });
 
 export const getLocations = asyncHandler(async (req, res) => {
@@ -65,7 +71,11 @@ export const getLocations = asyncHandler(async (req, res) => {
   const filter = isManager ? { _id: { $in: currentUser.location_ids || [] } } : {};
 
   const locations = await Location.find(filter).sort({ createdAt: -1 });
-  return res.json({ success: true, count: locations.length, data: locations });
+  return res.json({
+    success: true,
+    count: locations.length,
+    data: locations.map((item) => toLocationResponse(item)),
+  });
 });
 
 export const getLocationById = asyncHandler(async (req, res) => {
@@ -89,7 +99,7 @@ export const getLocationById = asyncHandler(async (req, res) => {
     });
   }
 
-  return res.json({ success: true, data: location });
+  return res.json({ success: true, data: toLocationResponse(location) });
 });
 
 export const updateLocation = asyncHandler(async (req, res) => {
@@ -113,18 +123,28 @@ export const updateLocation = asyncHandler(async (req, res) => {
     });
   }
 
-  const timezone = normalizeTimezone(req.body.timezone || location.timezone);
-  if (timezone && !ALLOWED_TIMEZONES.includes(timezone)) {
+  const timezone = normalizeTimezone(req.body.timezone || location.timezone, {
+    fallback: "",
+    restrictToAllowed: true,
+  });
+  if (!timezone || !ALLOWED_LOCATION_TIMEZONES.includes(timezone)) {
     return res.status(400).json({
       success: false,
-      message: `Timezone must be one of: ${ALLOWED_TIMEZONES.join(", ")}`,
+      message: `Timezone must be one of: ${ALLOWED_LOCATION_TIMEZONES.join(", ")}`,
     });
   }
   const otherLocations = await Location.find({ _id: { $ne: req.params.id } }).select(
     "timezone"
   );
   const timezoneSet = new Set(
-    otherLocations.map((item) => normalizeTimezone(item.timezone)).filter(Boolean)
+    otherLocations
+      .map((item) =>
+        normalizeTimezone(item.timezone, {
+          fallback: "",
+          restrictToAllowed: true,
+        })
+      )
+      .filter(Boolean)
   );
   timezoneSet.add(timezone);
 
@@ -140,7 +160,7 @@ export const updateLocation = asyncHandler(async (req, res) => {
     runValidators: true,
   });
 
-  return res.json({ success: true, data: updated });
+  return res.json({ success: true, data: toLocationResponse(updated) });
 });
 
 export const deleteLocation = asyncHandler(async (req, res) => {
