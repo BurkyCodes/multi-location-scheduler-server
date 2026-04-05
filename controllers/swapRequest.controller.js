@@ -9,6 +9,10 @@ import {
   sendUserNotification,
 } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
+import {
+  publishRealtimeEventForLocation,
+  publishRealtimeEventToUsers,
+} from "../services/realtimeEvents.service.js";
 
 const MAX_PENDING_SWAP_DROP_REQUESTS = 3;
 const DROP_AUTO_EXPIRY_HOURS_BEFORE_SHIFT = 24;
@@ -84,6 +88,43 @@ const isExpired = (swapRequest) =>
   swapRequest.expires_at && new Date(swapRequest.expires_at) < new Date();
 
 const toId = (value) => (value ? value.toString() : null);
+
+const emitSwapRealtime = async (swapRequest, action, extras = {}) => {
+  if (!swapRequest) return;
+  const swapId = toId(swapRequest._id);
+  const fromAssignmentId = toId(swapRequest.from_assignment_id?._id || swapRequest.from_assignment_id);
+  const audience = [
+    swapRequest.requester_id,
+    swapRequest.target_user_id,
+    swapRequest.claimed_by_user_id,
+    swapRequest.manager_id,
+  ]
+    .filter(Boolean)
+    .map((id) => toId(id));
+
+  const payload = {
+    action,
+    swap_request_id: swapId,
+    from_assignment_id: fromAssignmentId,
+    status: swapRequest.status,
+    at: new Date().toISOString(),
+    ...extras,
+  };
+
+  publishRealtimeEventToUsers(audience, "swap_changed", payload);
+
+  const fromAssignment = await ShiftAssignment.findById(fromAssignmentId).populate({
+    path: "shift_id",
+    select: "location_id",
+  });
+  const locationId = fromAssignment?.shift_id?.location_id;
+  if (locationId) {
+    await publishRealtimeEventForLocation(locationId, "swap_changed", {
+      ...payload,
+      location_id: locationId.toString(),
+    });
+  }
+};
 
 export const createSwapRequest = asyncHandler(async (req, res) => {
   const {
@@ -271,6 +312,7 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
     const populatedPickup = await SwapRequest.findById(pickupDoc._id).populate(
       "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id"
     );
+    await emitSwapRealtime(populatedPickup, "pickup_created");
     return res.status(201).json({ success: true, data: populatedPickup });
   }
 
@@ -357,6 +399,7 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
   const populated = await SwapRequest.findById(doc._id).populate(
     "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id"
   );
+  await emitSwapRealtime(populated, "created");
 
   return res.status(201).json({ success: true, data: populated });
 });
@@ -386,6 +429,7 @@ export const deleteSwapRequest = asyncHandler(async (req, res) => {
     before_state: swapRequest.toObject(),
     after_state: null,
   });
+  await emitSwapRealtime(swapRequest, "deleted");
   return res.json({ success: true, message: "Swap request deleted" });
 });
 
@@ -438,6 +482,7 @@ export const updateSwapRequest = asyncHandler(async (req, res) => {
     before_state: existing.toObject(),
     after_state: updated?.toObject ? updated.toObject() : updated,
   });
+  await emitSwapRealtime(updated, "updated");
 
   return res.json({ success: true, data: updated });
 });
@@ -591,6 +636,7 @@ export const cancelSwapRequest = asyncHandler(async (req, res) => {
     before_state: beforeState,
     after_state: swapRequest.toObject(),
   });
+  await emitSwapRealtime(swapRequest, "cancelled");
 
   return res.json({ success: true, data: swapRequest });
 });
@@ -732,6 +778,7 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
     before_state: swapRequest.toObject ? swapRequest.toObject() : swapRequest,
     after_state: acceptedSwapRequest.toObject ? acceptedSwapRequest.toObject() : acceptedSwapRequest,
   });
+  await emitSwapRealtime(acceptedSwapRequest, "accepted");
 
   await sendUserNotification({
     user_id: swapRequest.requester_id,
@@ -819,6 +866,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
       before_state: beforeState,
       after_state: swapRequest.toObject(),
     });
+    await emitSwapRealtime(swapRequest, "rejected");
     await sendBulkNotifications([swapRequest.requester_id, swapRequest.claimed_by_user_id], {
       title: "Swap request rejected",
       message: "A manager rejected the swap request.",
@@ -989,6 +1037,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     before_state: null,
     after_state: swapRequest.toObject(),
   });
+  await emitSwapRealtime(swapRequest, "approved");
 
   await sendUserNotification({
     user_id: requesterUser._id,

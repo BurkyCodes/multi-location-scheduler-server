@@ -11,6 +11,7 @@ import SwapRequest from "../models/SwapRequest.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { sendUserNotification } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
+import { publishRealtimeEventForLocation } from "../services/realtimeEvents.service.js";
 import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
@@ -1664,6 +1665,13 @@ export const createAssignment = asyncHandler(async (req, res) => {
         },
       });
     }
+    await publishRealtimeEventForLocation(shift.location_id, "assignment_changed", {
+      action: "created",
+      assignment_id: assignment._id.toString(),
+      shift_id: shift._id.toString(),
+      location_id: shift.location_id.toString(),
+      at: new Date().toISOString(),
+    });
 
     return res.status(201).json({
       success: true,
@@ -1914,6 +1922,13 @@ export const updateAssignment = asyncHandler(async (req, res) => {
         },
       });
     }
+    await publishRealtimeEventForLocation(shift.location_id, "assignment_changed", {
+      action: "updated",
+      assignment_id: assignment._id.toString(),
+      shift_id: shift._id.toString(),
+      location_id: shift.location_id.toString(),
+      at: new Date().toISOString(),
+    });
 
     return res.json({
       success: true,
@@ -1970,6 +1985,13 @@ export const deleteAssignment = asyncHandler(async (req, res) => {
     action: "delete",
     before_state: assignment.toObject(),
     after_state: null,
+  });
+  await publishRealtimeEventForLocation(shift.location_id, "assignment_changed", {
+    action: "deleted",
+    assignment_id: assignment._id.toString(),
+    shift_id: shift._id.toString(),
+    location_id: shift.location_id.toString(),
+    at: new Date().toISOString(),
   });
   return res.json({ success: true, message: "Assignment deleted" });
 });
@@ -2046,6 +2068,14 @@ export const clockInAssignment = asyncHandler(async (req, res) => {
     event_at_utc: eventTime,
     source: isAssignee ? "staff" : "manager",
   });
+  await publishRealtimeEventForLocation(assignment.shift_id.location_id, "clock_changed", {
+    action: "clock_in",
+    assignment_id: assignment._id.toString(),
+    shift_id: assignment.shift_id._id.toString(),
+    location_id: assignment.shift_id.location_id.toString(),
+    user_id: assignment.user_id.toString(),
+    at: new Date().toISOString(),
+  });
 
   return res.json({ success: true, message: "Clocked in successfully", data: assignment });
 });
@@ -2118,6 +2148,14 @@ export const pauseAssignment = asyncHandler(async (req, res) => {
     action: "pause",
     before_state: null,
     after_state: assignment.toObject(),
+  });
+  await publishRealtimeEventForLocation(assignment.shift_id.location_id, "clock_changed", {
+    action: "paused",
+    assignment_id: assignment._id.toString(),
+    shift_id: assignment.shift_id._id.toString(),
+    location_id: assignment.shift_id.location_id.toString(),
+    user_id: assignment.user_id.toString(),
+    at: new Date().toISOString(),
   });
 
   return res.json({ success: true, message: "Assignment paused", data: assignment });
@@ -2196,6 +2234,14 @@ export const resumeAssignment = asyncHandler(async (req, res) => {
     action: "resume",
     before_state: null,
     after_state: assignment.toObject(),
+  });
+  await publishRealtimeEventForLocation(assignment.shift_id.location_id, "clock_changed", {
+    action: "resumed",
+    assignment_id: assignment._id.toString(),
+    shift_id: assignment.shift_id._id.toString(),
+    location_id: assignment.shift_id.location_id.toString(),
+    user_id: assignment.user_id.toString(),
+    at: new Date().toISOString(),
   });
   return res.json({ success: true, message: "Assignment resumed", data: assignment });
 });
@@ -2280,6 +2326,14 @@ export const clockOutAssignment = asyncHandler(async (req, res) => {
     type: "clock_out",
     event_at_utc: eventTime,
     source: isAssignee ? "staff" : "manager",
+  });
+  await publishRealtimeEventForLocation(assignment.shift_id.location_id, "clock_changed", {
+    action: "clock_out",
+    assignment_id: assignment._id.toString(),
+    shift_id: assignment.shift_id._id.toString(),
+    location_id: assignment.shift_id.location_id.toString(),
+    user_id: assignment.user_id.toString(),
+    at: new Date().toISOString(),
   });
 
   return res.json({ success: true, message: "Clocked out successfully", data: assignment });
@@ -2392,6 +2446,14 @@ export const recoverMissingClockOut = asyncHandler(async (req, res) => {
     type: "clock_out",
     event_at_utc: eventTime,
     source: "manager",
+  });
+  await publishRealtimeEventForLocation(assignment.shift_id.location_id, "clock_changed", {
+    action: "recovered_clock_out",
+    assignment_id: assignment._id.toString(),
+    shift_id: assignment.shift_id._id.toString(),
+    location_id: assignment.shift_id.location_id.toString(),
+    user_id: assignment.user_id.toString(),
+    at: new Date().toISOString(),
   });
 
   return res.json({

@@ -17,6 +17,7 @@ import fairnessRoutes from "./fairness.route.js";
 import notificationRoutes from "./notification.route.js";
 import clockEventRoutes from "./clockEvent.route.js";
 import auditLogRoutes from "./auditLog.route.js";
+import realtimeRoutes from "./realtime.route.js";
 
 const router = Router();
 
@@ -38,5 +39,6 @@ router.use("/fairness-snapshots", fairnessRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/clock-events", clockEventRoutes);
 router.use("/audit-logs", auditLogRoutes);
+router.use("/realtime", realtimeRoutes);
 
 export default router;

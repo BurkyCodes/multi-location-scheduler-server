@@ -13,6 +13,7 @@ import {
   sendBulkNotifications as notifyBulk,
 } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
+import { publishRealtimeEventForLocation } from "../services/realtimeEvents.service.js";
 import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
@@ -259,6 +260,13 @@ export const createShift = asyncHandler(async (req, res) => {
     before_state: null,
     after_state: shift.toObject(),
   });
+  await publishRealtimeEventForLocation(location_id, "shift_changed", {
+    action: "created",
+    shift_id: shift._id.toString(),
+    schedule_id: schedule_id.toString(),
+    location_id: location_id.toString(),
+    at: new Date().toISOString(),
+  });
 
   return res.status(201).json({ success: true, data: toShiftResponse(populated) });
 });
@@ -486,6 +494,34 @@ export const updateShift = asyncHandler(async (req, res) => {
     before_state: shift.toObject(),
     after_state: updated?.toObject ? updated.toObject() : updated,
   });
+  await publishRealtimeEventForLocation(
+    updated?.location_id?._id || updated?.location_id || shift.location_id,
+    "shift_changed",
+    {
+      action: "updated",
+      shift_id: shift._id.toString(),
+      schedule_id: (updated?.schedule_id?._id || updated?.schedule_id || shift.schedule_id).toString(),
+      location_id: (
+        updated?.location_id?._id ||
+        updated?.location_id ||
+        shift.location_id
+      ).toString(),
+      auto_cancelled_pending_swap_requests: cancelledSwapSummary.cancelled_count,
+      at: new Date().toISOString(),
+    }
+  );
+  if (cancelledSwapSummary.cancelled_count > 0) {
+    await publishRealtimeEventForLocation(
+      updated?.location_id?._id || updated?.location_id || shift.location_id,
+      "swap_changed",
+      {
+        action: "auto_cancelled_by_shift_edit",
+        shift_id: shift._id.toString(),
+        cancelled_count: cancelledSwapSummary.cancelled_count,
+        at: new Date().toISOString(),
+      }
+    );
+  }
 
   return res.json({
     success: true,
@@ -529,6 +565,13 @@ export const deleteShift = asyncHandler(async (req, res) => {
     action: "delete",
     before_state: shift.toObject(),
     after_state: null,
+  });
+  await publishRealtimeEventForLocation(shift.location_id, "shift_changed", {
+    action: "deleted",
+    shift_id: shift._id.toString(),
+    schedule_id: shift.schedule_id.toString(),
+    location_id: shift.location_id.toString(),
+    at: new Date().toISOString(),
   });
   return res.json({ success: true, message: "Shift deleted" });
 });

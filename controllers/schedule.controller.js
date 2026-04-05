@@ -7,6 +7,7 @@ import {
   sendBulkNotifications,
 } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
+import { publishRealtimeEventForLocation } from "../services/realtimeEvents.service.js";
 
 const normalizeWeekStartDate = (value) => {
   const date = new Date(value);
@@ -101,6 +102,12 @@ export const createSchedule = asyncHandler(async (req, res) => {
     action: "create",
     before_state: null,
     after_state: schedule.toObject(),
+  });
+  await publishRealtimeEventForLocation(location_id, "schedule_changed", {
+    action: "created",
+    schedule_id: schedule._id.toString(),
+    location_id: location_id.toString(),
+    at: new Date().toISOString(),
   });
 
   return res.status(201).json({ success: true, data: schedule });
@@ -243,6 +250,20 @@ export const updateSchedule = asyncHandler(async (req, res) => {
     before_state: schedule.toObject(),
     after_state: updated?.toObject ? updated.toObject() : updated,
   });
+  await publishRealtimeEventForLocation(
+    updated?.location_id?._id || updated?.location_id || schedule.location_id,
+    "schedule_changed",
+    {
+      action: "updated",
+      schedule_id: schedule._id.toString(),
+      location_id: (
+        updated?.location_id?._id ||
+        updated?.location_id ||
+        schedule.location_id
+      ).toString(),
+      at: new Date().toISOString(),
+    }
+  );
 
   return res.json({ success: true, data: updated });
 });
@@ -287,6 +308,12 @@ export const deleteSchedule = asyncHandler(async (req, res) => {
     action: "delete",
     before_state: schedule.toObject(),
     after_state: null,
+  });
+  await publishRealtimeEventForLocation(schedule.location_id, "schedule_changed", {
+    action: "deleted",
+    schedule_id: schedule._id.toString(),
+    location_id: schedule.location_id.toString(),
+    at: new Date().toISOString(),
   });
   return res.json({ success: true, message: "Schedule deleted" });
 });
@@ -340,6 +367,12 @@ export const publishSchedule = asyncHandler(async (req, res) => {
     before_state: beforeState,
     after_state: populated?.toObject ? populated.toObject() : populated,
   });
+  await publishRealtimeEventForLocation(schedule.location_id, "schedule_changed", {
+    action: "published",
+    schedule_id: schedule._id.toString(),
+    location_id: schedule.location_id.toString(),
+    at: new Date().toISOString(),
+  });
   return res.json({ success: true, data: populated });
 });
 
@@ -389,6 +422,12 @@ export const unpublishSchedule = asyncHandler(async (req, res) => {
     action: "unpublish",
     before_state: beforeState,
     after_state: populated?.toObject ? populated.toObject() : populated,
+  });
+  await publishRealtimeEventForLocation(schedule.location_id, "schedule_changed", {
+    action: "unpublished",
+    schedule_id: schedule._id.toString(),
+    location_id: schedule.location_id.toString(),
+    at: new Date().toISOString(),
   });
   return res.json({ success: true, data: populated });
 });

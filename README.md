@@ -100,6 +100,7 @@ Role emails:
   - Fairness score + under/over scheduled lists
 - Notification persistence with read/unread flows
 - Notification idempotency key support to deduplicate retry-generated in-app notifications
+- Real-time SSE transport for live schedule/shift/assignment/swap/clock/notification updates
 - Clock-in/pause/resume/clock-out tracking
 - Manager recovery endpoint for missing clock-out events: `POST /api/assignments/:id/recover-clock-out`
 - Labor alert pipeline persists warning/block records and exposes role-scoped labor alert APIs
@@ -109,9 +110,24 @@ Role emails:
 - Legacy endpoint hardening added for notifications, availabilities, preferences, skills, certifications, clock events, user roles, and user mutation routes
 
 ### Partially Implemented 
-- Real-time update transport (WebSocket/SSE) is not implemented yet
 - Audit coverage is broad for scheduling domain entities, but legacy/non-scheduling modules may still need additional audit hooks
 - Endpoint auth/authorization hardening is applied for major routes, with continuing scope for incremental endpoint-level tightening
+
+## Real-Time Events (SSE)
+- Endpoint: `GET /api/realtime/stream`
+- Auth:
+  - `Authorization: Bearer <token>` header, or
+  - `?token=<jwt>` query parameter (used by browser `EventSource`)
+- Transport: Server-Sent Events (SSE) with heartbeat every 25 seconds
+- Events emitted:
+  - `schedule_changed`
+  - `shift_changed`
+  - `assignment_changed`
+  - `swap_changed`
+  - `clock_changed`
+  - `notification_created`
+- Client wiring:
+  - `client/src/Layouts/NotificationsBootstrap.jsx` subscribes to SSE and refreshes affected Redux slices in real time.
 
 ## Evaluation Scenario Mapping
 1. Sunday Night Chaos

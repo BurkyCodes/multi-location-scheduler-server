@@ -3,6 +3,7 @@ import DeviceToken from "../models/DeviceToken.js";
 import User from "../models/User.js";
 import UserRole from "../models/UserRole.js";
 import admin, { isFirebaseReady } from "../config/firebase.js";
+import { publishRealtimeEventToUser } from "./realtimeEvents.service.js";
 
 const toIdString = (value) => {
   if (!value) return "";
@@ -61,6 +62,13 @@ export const sendUserNotification = async ({
     idempotency_key,
     delivery_status: "sent",
     status: "unread",
+  });
+  publishRealtimeEventToUser(userId, "notification_created", {
+    notification_id: notification._id.toString(),
+    category: notification.category || category || "",
+    title: notification.title || title || "Notification",
+    message: notification.message || message || "",
+    createdAt: notification.createdAt,
   });
 
   const result = {
