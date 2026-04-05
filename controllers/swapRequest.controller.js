@@ -2,18 +2,72 @@ import SwapRequest from "../models/SwapRequest.js";
 import ShiftAssignment from "../models/ShiftAssignment.js";
 import User from "../models/User.js";
 import asyncHandler from "../utils/asyncHandler.js";
-import { createCrudController } from "./crud.controller.js";
 import { evaluateAssignmentRules } from "./assignment.controller.js";
 import {
   getActiveManagersForLocation,
   sendBulkNotifications,
   sendUserNotification,
 } from "../services/notificationEvents.service.js";
+import { logAuditChange } from "../services/auditLog.service.js";
 
-const swapController = createCrudController(SwapRequest, {
-  populate:
-    "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id",
-});
+const MAX_PENDING_SWAP_DROP_REQUESTS = 3;
+const DROP_AUTO_EXPIRY_HOURS_BEFORE_SHIFT = 24;
+
+const PENDING_SWAP_STATUSES = ["pending_peer_acceptance", "pending_manager_approval", "processing"];
+
+const computeDropAutoExpiry = (shiftStartsAtUtc) =>
+  new Date(new Date(shiftStartsAtUtc).getTime() - DROP_AUTO_EXPIRY_HOURS_BEFORE_SHIFT * 60 * 60 * 1000);
+
+const normalizeSwapExpiry = ({ type, providedExpiresAt, shiftStartsAtUtc }) => {
+  const provided =
+    providedExpiresAt && !Number.isNaN(new Date(providedExpiresAt).getTime())
+      ? new Date(providedExpiresAt)
+      : null;
+  if (type !== "drop") {
+    return provided;
+  }
+  const autoExpiry = computeDropAutoExpiry(shiftStartsAtUtc);
+  if (!provided) return autoExpiry;
+  return provided < autoExpiry ? provided : autoExpiry;
+};
+
+const shouldAutoExpireDrop = ({ swapRequest, shiftStartsAtUtc }) => {
+  if (swapRequest?.type !== "drop") return false;
+  if (swapRequest?.status !== "pending_peer_acceptance") return false;
+  const autoExpiry = computeDropAutoExpiry(shiftStartsAtUtc);
+  return new Date() >= autoExpiry;
+};
+
+const expireUnclaimedDropRequests = async () => {
+  const pendingDrops = await SwapRequest.find({
+    type: "drop",
+    status: "pending_peer_acceptance",
+  }).populate({
+    path: "from_assignment_id",
+    populate: {
+      path: "shift_id",
+      select: "starts_at_utc",
+    },
+  });
+
+  const now = new Date();
+  const expiredIds = [];
+  pendingDrops.forEach((request) => {
+    const shiftStart = request?.from_assignment_id?.shift_id?.starts_at_utc;
+    if (!shiftStart) return;
+    const autoExpiry = computeDropAutoExpiry(shiftStart);
+    if (now >= autoExpiry) {
+      expiredIds.push(request._id);
+    }
+  });
+
+  if (expiredIds.length) {
+    await SwapRequest.updateMany(
+      { _id: { $in: expiredIds } },
+      { $set: { status: "expired" } }
+    );
+  }
+};
 
 const assignmentShiftPopulate = {
   path: "shift_id",
@@ -73,15 +127,46 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
     });
   }
 
+  if (type === "pickup") {
+    return res.status(400).json({
+      success: false,
+      message: "pickup requests are created by accepting a drop request, not via create endpoint",
+    });
+  }
+
+  if (["swap", "drop"].includes(type)) {
+    const pendingCount = await SwapRequest.countDocuments({
+      requester_id,
+      type: { $in: ["swap", "drop"] },
+      status: { $in: PENDING_SWAP_STATUSES },
+    });
+    if (pendingCount >= MAX_PENDING_SWAP_DROP_REQUESTS) {
+      return res.status(409).json({
+        success: false,
+        message: `You already have ${pendingCount} pending swap/drop requests. Maximum allowed is ${MAX_PENDING_SWAP_DROP_REQUESTS}.`,
+      });
+    }
+  }
+
   const doc = await SwapRequest.create({
     type,
     requester_id,
     from_assignment_id,
     target_user_id,
     requested_assignment_id,
-    expires_at,
+    expires_at: normalizeSwapExpiry({
+      type,
+      providedExpiresAt: expires_at,
+      shiftStartsAtUtc: fromAssignment.shift_id.starts_at_utc,
+    }),
     note,
     status: "pending_peer_acceptance",
+  });
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "create",
+    after_state: doc.toObject(),
   });
 
   const shift = fromAssignment.shift_id;
@@ -149,9 +234,41 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
 
   return res.status(201).json({ success: true, data: populated });
 });
-export const deleteSwapRequest = swapController.deleteById;
+export const deleteSwapRequest = asyncHandler(async (req, res) => {
+  const currentUser = await getUserWithRole(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const swapRequest = await SwapRequest.findById(req.params.id);
+  if (!swapRequest) {
+    return res.status(404).json({ success: false, message: "Swap request not found" });
+  }
+
+  const role = currentUser.role_id?.role;
+  const isRequester = toId(swapRequest.requester_id) === toId(currentUser._id);
+  const isManagerOrAdmin = ["manager", "admin"].includes(role);
+  if (!isRequester && !isManagerOrAdmin) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
+  await SwapRequest.findByIdAndDelete(req.params.id);
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "delete",
+    before_state: swapRequest.toObject(),
+    after_state: null,
+  });
+  return res.json({ success: true, message: "Swap request deleted" });
+});
 
 export const updateSwapRequest = asyncHandler(async (req, res) => {
+  const currentUser = await getUserWithRole(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   const restrictedFields = [
     "status",
     "requester_id",
@@ -169,6 +286,18 @@ export const updateSwapRequest = asyncHandler(async (req, res) => {
     });
   }
 
+  const existing = await SwapRequest.findById(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ success: false, message: "Swap request not found" });
+  }
+
+  const role = currentUser.role_id?.role;
+  const isRequester = toId(existing.requester_id) === toId(currentUser._id);
+  const isManagerOrAdmin = ["manager", "admin"].includes(role);
+  if (!isRequester && !isManagerOrAdmin) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
   const updated = await SwapRequest.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
@@ -176,14 +305,19 @@ export const updateSwapRequest = asyncHandler(async (req, res) => {
     "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id"
   );
 
-  if (!updated) {
-    return res.status(404).json({ success: false, message: "Swap request not found" });
-  }
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "update",
+    before_state: existing.toObject(),
+    after_state: updated?.toObject ? updated.toObject() : updated,
+  });
 
   return res.json({ success: true, data: updated });
 });
 
 export const getSwapRequests = asyncHandler(async (_req, res) => {
+  await expireUnclaimedDropRequests();
   const docs = await SwapRequest.find()
     .populate("requester_id target_user_id requested_assignment_id claimed_by_user_id manager_id")
     .populate({
@@ -206,6 +340,7 @@ export const getSwapRequests = asyncHandler(async (_req, res) => {
 });
 
 export const getSwapRequestById = asyncHandler(async (req, res) => {
+  await expireUnclaimedDropRequests();
   const doc = await SwapRequest.findById(req.params.id)
     .populate("requester_id target_user_id requested_assignment_id claimed_by_user_id manager_id")
     .populate({
@@ -254,7 +389,15 @@ export const cancelSwapRequest = asyncHandler(async (req, res) => {
 
   swapRequest.status = "cancelled";
   swapRequest.cancelled_reason = req.body.cancelled_reason || "Cancelled by requester";
+  const beforeState = swapRequest.toObject();
   await swapRequest.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "cancel",
+    before_state: beforeState,
+    after_state: swapRequest.toObject(),
+  });
 
   return res.json({ success: true, data: swapRequest });
 });
@@ -332,6 +475,15 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
     });
   }
 
+  if (shouldAutoExpireDrop({ swapRequest, shiftStartsAtUtc: fromAssignment.shift_id.starts_at_utc })) {
+    swapRequest.status = "expired";
+    await swapRequest.save();
+    return res.status(409).json({
+      success: false,
+      message: "Drop request has expired (24 hours before shift start)",
+    });
+  }
+
   const violations = await evaluateAssignmentRules({
     user: currentUser,
     shift: fromAssignment.shift_id,
@@ -380,6 +532,13 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
       message: "Swap request was updated by another user. Please refresh and retry.",
     });
   }
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "accept",
+    before_state: swapRequest.toObject ? swapRequest.toObject() : swapRequest,
+    after_state: acceptedSwapRequest.toObject ? acceptedSwapRequest.toObject() : acceptedSwapRequest,
+  });
 
   await sendUserNotification({
     user_id: swapRequest.requester_id,
@@ -457,8 +616,16 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   }
 
   if (!approve) {
+    const beforeState = swapRequest.toObject();
     swapRequest.status = "rejected";
     await swapRequest.save();
+    await logAuditChange({
+      actor_user_id: req.userId,
+      entity_type: "swap_request",
+      action: "manager_reject",
+      before_state: beforeState,
+      after_state: swapRequest.toObject(),
+    });
     await sendBulkNotifications([swapRequest.requester_id, swapRequest.claimed_by_user_id], {
       title: "Swap request rejected",
       message: "A manager rejected the swap request.",
@@ -622,6 +789,13 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
 
   swapRequest.status = "approved";
   await swapRequest.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "swap_request",
+    action: "manager_approve",
+    before_state: null,
+    after_state: swapRequest.toObject(),
+  });
 
   await sendUserNotification({
     user_id: requesterUser._id,

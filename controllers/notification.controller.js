@@ -1,5 +1,6 @@
 import Notification from "../models/Notification.js";
 import DeviceToken from "../models/DeviceToken.js";
+import User from "../models/User.js";
 import admin, { isFirebaseReady } from "../config/firebase.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { createCrudController } from "./crud.controller.js";
@@ -15,6 +16,9 @@ export const updateNotification = notificationController.updateById;
 export const deleteNotification = notificationController.deleteById;
 
 const resolveOrgUserId = (req) => req.body.org_user_id || req.query.org_user_id || req.userOrgId;
+const getCurrentUser = async (userId) =>
+  User.findById(userId).populate({ path: "role_id", select: "role" });
+const isManagerOrAdmin = (user) => ["manager", "admin"].includes(user?.role_id?.role);
 
 export const registerDeviceToken = asyncHandler(async (req, res) => {
   const { garage_id, fcm_token, device_type, device_name } = req.body;
@@ -210,11 +214,19 @@ export const sendNotification = asyncHandler(async (req, res) => {
 });
 
 export const getUserNotifications = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   const org_user_id = req.params.orgUserId || req.query.org_user_id || req.userOrgId;
   const { page = 1, limit = 20, status, category } = req.query;
 
   if (!org_user_id) {
     return res.status(400).json({ success: false, message: "org_user_id is required" });
+  }
+  if (!isManagerOrAdmin(currentUser) && String(org_user_id) !== String(req.userId)) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
   const filter = {
@@ -247,10 +259,18 @@ export const getUserNotifications = asyncHandler(async (req, res) => {
 });
 
 export const getUnreadCount = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   const org_user_id = req.params.orgUserId || req.query.org_user_id || req.userOrgId;
 
   if (!org_user_id) {
     return res.status(400).json({ success: false, message: "org_user_id is required" });
+  }
+  if (!isManagerOrAdmin(currentUser) && String(org_user_id) !== String(req.userId)) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
   const unread_count = await Notification.countDocuments({
@@ -262,6 +282,20 @@ export const getUnreadCount = asyncHandler(async (req, res) => {
 });
 
 export const markNotificationRead = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const existing = await Notification.findById(req.params.id).select("org_user_id user_id");
+  if (!existing) {
+    return res.status(404).json({ success: false, message: "Notification not found" });
+  }
+  const ownerOrgId = existing.org_user_id || existing.user_id;
+  if (!isManagerOrAdmin(currentUser) && String(ownerOrgId) !== String(req.userId)) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
   const notification = await Notification.findByIdAndUpdate(
     req.params.id,
     { read_at: new Date(), status: "read" },
@@ -276,10 +310,18 @@ export const markNotificationRead = asyncHandler(async (req, res) => {
 });
 
 export const markAllNotificationsRead = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   const org_user_id = req.params.orgUserId || req.body.org_user_id || req.userOrgId;
 
   if (!org_user_id) {
     return res.status(400).json({ success: false, message: "org_user_id is required" });
+  }
+  if (!isManagerOrAdmin(currentUser) && String(org_user_id) !== String(req.userId)) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
   }
 
   const result = await Notification.updateMany(
@@ -295,6 +337,20 @@ export const markAllNotificationsRead = asyncHandler(async (req, res) => {
 });
 
 export const softDeleteNotification = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const existing = await Notification.findById(req.params.id).select("org_user_id user_id");
+  if (!existing) {
+    return res.status(404).json({ success: false, message: "Notification not found" });
+  }
+  const ownerOrgId = existing.org_user_id || existing.user_id;
+  if (!isManagerOrAdmin(currentUser) && String(ownerOrgId) !== String(req.userId)) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+
   const notification = await Notification.findByIdAndUpdate(
     req.params.id,
     { status: "deleted" },

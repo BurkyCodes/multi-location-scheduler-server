@@ -77,6 +77,11 @@ Role emails:
   - Active certification for location
   - Availability window check (including overnight shifts)
   - Weekly max-hours cap using staff preference (default 40)
+  - Labor compliance automation:
+    - Daily >8h warning
+    - Daily >12h hard block
+    - 6th consecutive day warning
+    - 7th consecutive day requires manager override with documented reason
 - Existing assignees are re-validated before shift updates are applied
 - Shift headcount cannot be reduced below currently assigned staff count
 - Constraint violation responses include rule + reason
@@ -84,6 +89,8 @@ Role emails:
 - Swap/drop/pickup flow with peer acceptance + manager approval
 - Atomic swap acceptance and manager decision locking reduce concurrent acceptance/approval races
 - Pending swap cancellation by requester
+- Pending swap/drop cap enforced: max 3 pending swap/drop requests per requester
+- Drop requests auto-expire at shift start minus 24 hours (unclaimed drops)
 - Assignment concurrency lock for same user (reduces simultaneous assignment races)
 - Fairness analytics:
   - Hours distribution by staff
@@ -93,18 +100,18 @@ Role emails:
 - Notification idempotency key support to deduplicate retry-generated in-app notifications
 - Clock-in/pause/resume/clock-out tracking
 - Manager recovery endpoint for missing clock-out events: `POST /api/assignments/:id/recover-clock-out`
+- Labor alert pipeline persists warning/block records and exposes role-scoped labor alert APIs
+- Automatic audit logging for create/update/delete mutations in supported scheduling entities:
+  - schedules, shifts, shift assignments, swap requests, availabilities, notification preferences
+- Additional workflow audit logging for publish/unpublish, swap accept/decision/cancel, and assignment clock actions
 
-### Partially Implemented / Missing
+### Partially Implemented 
 - Real-time update transport (WebSocket/SSE) is not implemented yet
-- Labor law engine is incomplete:
-  - Missing automated daily 8/12 hour and 6th/7th consecutive-day enforcement
-  - `LaborAlert` exists but no full automatic rule pipeline
 - Swap/drop limits and expiry rules are incomplete:
-  - No hard cap of 3 pending requests per staff
-  - No automatic 24-hour-before-shift expiry for drop requests unless `expires_at` is set externally
+  - `pickup` request creation endpoint flow is still constrained; pickup is represented through accepting drops/swaps
 - Pending swap auto-cancel when shift is edited is not implemented
-- Full automatic audit logging on every mutation is not wired; audit logs currently rely on explicit create calls
-- Some endpoints still need stricter auth/authorization hardening
+- Audit coverage is broad for scheduling domain entities, but legacy/non-scheduling modules may still need additional audit hooks
+- Endpoint auth/authorization hardening improved significantly; continue tightening fine-grained ownership checks per endpoint as needed
 
 ## Evaluation Scenario Mapping
 1. Sunday Night Chaos
@@ -177,9 +184,3 @@ npm test
 ```
 
 Current test coverage is focused on swap accept/manager approval. Additional tests are recommended for assignment constraints, labor rules, realtime events, and concurrent operations.
-
-## Security / Ops Notes
-- Do not commit real secrets in `.env`.
-- Rotate any leaked DB credentials or JWT secrets immediately.
-- Add endpoint-level authorization checks where missing.
-- Add idempotency keys for write-heavy workflow endpoints.

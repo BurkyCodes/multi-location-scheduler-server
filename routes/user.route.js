@@ -14,7 +14,7 @@ const router = Router();
 router.post("/", checkAuthentication, requireAdmin, createUser);
 router.get("/", checkAuthentication, getUsers);
 router.get("/:id", checkAuthentication, getUserById);
-router.patch("/:id", checkAuthentication, updateUser);
-router.delete("/:id", checkAuthentication, deleteUser);
+router.patch("/:id", checkAuthentication, requireAdmin, updateUser);
+router.delete("/:id", checkAuthentication, requireAdmin, deleteUser);
 
 export default router;

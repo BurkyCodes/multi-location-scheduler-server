@@ -2,7 +2,11 @@ import AuditLog from "../models/AuditLog.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 export const createAuditLog = asyncHandler(async (req, res) => {
-  const auditLog = await AuditLog.create(req.body);
+  const payload = {
+    ...req.body,
+    actor_user_id: req.userId,
+  };
+  const auditLog = await AuditLog.create(payload);
   res.status(201).json({ success: true, data: auditLog });
 });
 

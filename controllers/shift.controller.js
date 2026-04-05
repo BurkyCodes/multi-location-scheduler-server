@@ -10,6 +10,7 @@ import {
   getActiveUsersByRole,
   sendBulkNotifications,
 } from "../services/notificationEvents.service.js";
+import { logAuditChange } from "../services/auditLog.service.js";
 import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
@@ -174,6 +175,14 @@ export const createShift = asyncHandler(async (req, res) => {
       },
     }
   );
+
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift",
+    action: "create",
+    before_state: null,
+    after_state: shift.toObject(),
+  });
 
   return res.status(201).json({ success: true, data: toShiftResponse(populated) });
 });
@@ -390,6 +399,14 @@ export const updateShift = asyncHandler(async (req, res) => {
     runValidators: true,
   }).populate("schedule_id location_id required_skill_id created_by updated_by");
 
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift",
+    action: "update",
+    before_state: shift.toObject(),
+    after_state: updated?.toObject ? updated.toObject() : updated,
+  });
+
   return res.json({ success: true, data: toShiftResponse(updated) });
 });
 
@@ -422,5 +439,12 @@ export const deleteShift = asyncHandler(async (req, res) => {
   }
 
   await Shift.findByIdAndDelete(req.params.id);
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift",
+    action: "delete",
+    before_state: shift.toObject(),
+    after_state: null,
+  });
   return res.json({ success: true, message: "Shift deleted" });
 });

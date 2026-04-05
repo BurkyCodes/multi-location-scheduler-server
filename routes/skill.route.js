@@ -11,19 +11,21 @@ import {
   updateSkill,
   updateStaffSkill,
 } from "../controllers/skill.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
+import { requireManagerOrAdmin } from "../middlewares/role.middleware.js";
 
 const router = Router();
 
-router.post("/staff", createStaffSkill);
-router.get("/staff/all", getStaffSkills);
-router.get("/staff/:id", getStaffSkillById);
-router.patch("/staff/:id", updateStaffSkill);
-router.delete("/staff/:id", deleteStaffSkill);
+router.post("/staff", checkAuthentication, requireManagerOrAdmin, createStaffSkill);
+router.get("/staff/all", checkAuthentication, getStaffSkills);
+router.get("/staff/:id", checkAuthentication, getStaffSkillById);
+router.patch("/staff/:id", checkAuthentication, requireManagerOrAdmin, updateStaffSkill);
+router.delete("/staff/:id", checkAuthentication, requireManagerOrAdmin, deleteStaffSkill);
 
-router.post("/", createSkill);
-router.get("/", getSkills);
-router.get("/:id", getSkillById);
-router.patch("/:id", updateSkill);
-router.delete("/:id", deleteSkill);
+router.post("/", checkAuthentication, requireManagerOrAdmin, createSkill);
+router.get("/", checkAuthentication, getSkills);
+router.get("/:id", checkAuthentication, getSkillById);
+router.patch("/:id", checkAuthentication, requireManagerOrAdmin, updateSkill);
+router.delete("/:id", checkAuthentication, requireManagerOrAdmin, deleteSkill);
 
 export default router;

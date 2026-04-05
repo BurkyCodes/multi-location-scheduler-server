@@ -6,6 +6,7 @@ import {
   getActiveUsersByRole,
   sendBulkNotifications,
 } from "../services/notificationEvents.service.js";
+import { logAuditChange } from "../services/auditLog.service.js";
 
 const normalizeWeekStartDate = (value) => {
   const date = new Date(value);
@@ -93,6 +94,14 @@ export const createSchedule = asyncHandler(async (req, res) => {
       },
     }
   );
+
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "schedule",
+    action: "create",
+    before_state: null,
+    after_state: schedule.toObject(),
+  });
 
   return res.status(201).json({ success: true, data: schedule });
 });
@@ -227,6 +236,14 @@ export const updateSchedule = asyncHandler(async (req, res) => {
     runValidators: true,
   }).populate("location_id published_by");
 
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "schedule",
+    action: "update",
+    before_state: schedule.toObject(),
+    after_state: updated?.toObject ? updated.toObject() : updated,
+  });
+
   return res.json({ success: true, data: updated });
 });
 
@@ -264,6 +281,13 @@ export const deleteSchedule = asyncHandler(async (req, res) => {
   }
 
   await Schedule.findByIdAndDelete(req.params.id);
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "schedule",
+    action: "delete",
+    before_state: schedule.toObject(),
+    after_state: null,
+  });
   return res.json({ success: true, message: "Schedule deleted" });
 });
 
@@ -300,6 +324,7 @@ export const publishSchedule = asyncHandler(async (req, res) => {
     });
   }
 
+  const beforeState = schedule.toObject();
   schedule.status = "published";
   schedule.published_by = req.userId;
   schedule.published_at = new Date();
@@ -308,6 +333,13 @@ export const publishSchedule = asyncHandler(async (req, res) => {
   const populated = await Schedule.findById(schedule._id).populate(
     "location_id published_by"
   );
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "schedule",
+    action: "publish",
+    before_state: beforeState,
+    after_state: populated?.toObject ? populated.toObject() : populated,
+  });
   return res.json({ success: true, data: populated });
 });
 
@@ -344,11 +376,19 @@ export const unpublishSchedule = asyncHandler(async (req, res) => {
     });
   }
 
+  const beforeState = schedule.toObject();
   schedule.status = "unpublished";
   await schedule.save();
 
   const populated = await Schedule.findById(schedule._id).populate(
     "location_id published_by"
   );
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "schedule",
+    action: "unpublish",
+    before_state: beforeState,
+    after_state: populated?.toObject ? populated.toObject() : populated,
+  });
   return res.json({ success: true, data: populated });
 });

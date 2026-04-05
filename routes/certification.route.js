@@ -6,13 +6,15 @@ import {
   getCertifications,
   updateCertification,
 } from "../controllers/certification.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
+import { requireManagerOrAdmin } from "../middlewares/role.middleware.js";
 
 const router = Router();
 
-router.post("/", createCertification);
-router.get("/", getCertifications);
-router.get("/:id", getCertificationById);
-router.patch("/:id", updateCertification);
-router.delete("/:id", deleteCertification);
+router.post("/", checkAuthentication, requireManagerOrAdmin, createCertification);
+router.get("/", checkAuthentication, getCertifications);
+router.get("/:id", checkAuthentication, getCertificationById);
+router.patch("/:id", checkAuthentication, requireManagerOrAdmin, updateCertification);
+router.delete("/:id", checkAuthentication, requireManagerOrAdmin, deleteCertification);
 
 export default router;

@@ -4,11 +4,12 @@ import {
   getAvailabilityByUser,
   upsertAvailability,
 } from "../controllers/availability.controller.js";
+import { checkAuthentication } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-router.post("/", upsertAvailability);
-router.get("/user/:userId", getAvailabilityByUser);
-router.delete("/user/:userId", deleteAvailabilityByUser);
+router.post("/", checkAuthentication, upsertAvailability);
+router.get("/user/:userId", checkAuthentication, getAvailabilityByUser);
+router.delete("/user/:userId", checkAuthentication, deleteAvailabilityByUser);
 
 export default router;

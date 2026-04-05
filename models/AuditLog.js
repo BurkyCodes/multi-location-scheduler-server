@@ -25,6 +25,10 @@ const auditLogSchema = new Schema(
       ],
       required: [true, "Entity type is required"],
     },
+    entity_id: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
     action: {
       type: String,
       required: [true, "Action is required"],
@@ -49,5 +53,6 @@ const auditLogSchema = new Schema(
 );
 
 auditLogSchema.index({ location_id: 1, createdAt: -1 });
+auditLogSchema.index({ entity_type: 1, entity_id: 1, createdAt: -1 });
 
 export default mongoose.model("audit_logs", auditLogSchema);

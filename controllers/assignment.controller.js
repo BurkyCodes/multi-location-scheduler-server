@@ -10,6 +10,7 @@ import ClockEvent from "../models/ClockEvent.js";
 import SwapRequest from "../models/SwapRequest.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { sendUserNotification } from "../services/notificationEvents.service.js";
+import { logAuditChange } from "../services/auditLog.service.js";
 import {
   CANONICAL_TIMEZONES,
   normalizeTimezone as normalizeSupportedTimezone,
@@ -19,6 +20,9 @@ import {
 const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 const DEFAULT_WEEKLY_HOURS_LIMIT = 40;
 const ASSIGNMENT_LOCK_MS = 15000;
+const DAILY_WARNING_HOURS = 8;
+const DAILY_BLOCK_HOURS = 12;
+const WEEKLY_WARNING_HOURS = 35;
 
 const isShiftLockedByCutoff = (shiftStartUtc, cutoffHours) => {
   const cutoffMoment = new Date(
@@ -518,6 +522,286 @@ const computeDurationHours = (startsAt, endsAt) => {
   return (new Date(endsAt).getTime() - new Date(startsAt).getTime()) / (60 * 60 * 1000);
 };
 
+const getShiftDailySegments = (shift, timezone) => {
+  const start = getLocalParts(shift.starts_at_utc, timezone);
+  const end = getLocalParts(shift.ends_at_utc, timezone);
+  const startMinutes = toMinutes(start.time);
+  const endMinutes = toMinutes(end.time);
+  if (startMinutes === null || endMinutes === null) return [];
+
+  if (start.date === end.date) {
+    return [
+      {
+        date: start.date,
+        minutes: Math.max(0, endMinutes - startMinutes),
+      },
+    ];
+  }
+
+  return [
+    {
+      date: start.date,
+      minutes: Math.max(0, 1440 - startMinutes),
+    },
+    {
+      date: end.date,
+      minutes: Math.max(0, endMinutes),
+    },
+  ];
+};
+
+const incrementMapValue = (map, key, value) => {
+  if (!key) return;
+  map.set(key, (map.get(key) || 0) + value);
+};
+
+const getLocalWeekBucketFromDateLabel = (dateLabel) => {
+  const [year, month, day] = String(dateLabel || "")
+    .split("-")
+    .map(Number);
+  if (!year || !month || !day) return "";
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const weekday = date.getUTCDay(); // 0=Sun
+  const diffToMonday = (weekday + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - diffToMonday);
+  return date.toISOString().slice(0, 10);
+};
+
+const getLongestConsecutiveStreak = (dateLabels = []) => {
+  const unique = [...new Set(dateLabels)].sort();
+  if (!unique.length) return 0;
+
+  let longest = 1;
+  let current = 1;
+  for (let i = 1; i < unique.length; i += 1) {
+    const prev = new Date(`${unique[i - 1]}T00:00:00.000Z`);
+    const curr = new Date(`${unique[i]}T00:00:00.000Z`);
+    const diffDays = Math.round((curr.getTime() - prev.getTime()) / (24 * 60 * 60 * 1000));
+    if (diffDays === 1) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 1;
+    }
+  }
+  return longest;
+};
+
+const isSeventhDayOverrideValid = (managerOverride) => {
+  if (!managerOverride?.is_override) return false;
+  if (managerOverride?.override_type !== "seventh_consecutive_day") return false;
+  if (!String(managerOverride?.reason || "").trim()) return false;
+  return true;
+};
+
+const buildLaborCompliance = ({
+  existingShifts,
+  shift,
+  weeklyHoursLimit,
+  managerOverride,
+}) => {
+  const warnings = [];
+  const violations = [];
+  const alerts = [];
+
+  const shiftTimezone = normalizeTimezone(shift.location_timezone);
+  const projectedWeekBucket = getLocalWeekBucket(shift.starts_at_utc, shiftTimezone);
+
+  const dayMinutesMap = new Map();
+  const workedDayLabels = [];
+  let weeklyHoursInBucket = 0;
+
+  existingShifts.forEach((existing) => {
+    const duration = computeDurationHours(existing.starts_at_utc, existing.ends_at_utc);
+    const weekBucket = getLocalWeekBucket(existing.starts_at_utc, shiftTimezone);
+    if (weekBucket === projectedWeekBucket) {
+      weeklyHoursInBucket += duration;
+    }
+
+    const segments = getShiftDailySegments(existing, shiftTimezone);
+    segments.forEach((segment) => {
+      incrementMapValue(dayMinutesMap, segment.date, segment.minutes);
+      if (segment.minutes > 0 && getLocalWeekBucketFromDateLabel(segment.date) === projectedWeekBucket) {
+        workedDayLabels.push(segment.date);
+      }
+    });
+  });
+
+  const projectedSegments = getShiftDailySegments(shift, shiftTimezone);
+  projectedSegments.forEach((segment) => {
+    incrementMapValue(dayMinutesMap, segment.date, segment.minutes);
+    if (segment.minutes > 0 && getLocalWeekBucketFromDateLabel(segment.date) === projectedWeekBucket) {
+      workedDayLabels.push(segment.date);
+    }
+  });
+
+  const projectedWeeklyHours = weeklyHoursInBucket + computeDurationHours(shift.starts_at_utc, shift.ends_at_utc);
+
+  if (projectedWeeklyHours >= WEEKLY_WARNING_HOURS) {
+    const warning = {
+      rule: "weekly_35_warning",
+      message: `Projected weekly hours ${projectedWeeklyHours.toFixed(
+        1
+      )}h (warning threshold ${WEEKLY_WARNING_HOURS}h)`,
+    };
+    warnings.push(warning);
+    alerts.push({
+      type: "weekly_35_warning",
+      severity: "warning",
+      message: warning.message,
+      metadata: { projected_hours: Number(projectedWeeklyHours.toFixed(2)) },
+    });
+  }
+
+  if (projectedWeeklyHours > weeklyHoursLimit) {
+    violations.push({
+      rule: "weekly_overtime",
+      message: `Projected weekly hours would be ${projectedWeeklyHours.toFixed(
+        1
+      )}, above limit ${weeklyHoursLimit}`,
+    });
+    alerts.push({
+      type: "weekly_40_overtime",
+      severity: "warning",
+      message: `Projected weekly hours ${projectedWeeklyHours.toFixed(
+        1
+      )}h exceeds configured weekly limit ${weeklyHoursLimit}h`,
+      metadata: { projected_hours: Number(projectedWeeklyHours.toFixed(2)), weekly_limit: weeklyHoursLimit },
+    });
+  }
+
+  dayMinutesMap.forEach((minutes, dateLabel) => {
+    const hours = minutes / 60;
+    if (hours > DAILY_BLOCK_HOURS) {
+      const message = `Projected daily hours on ${dateLabel} would be ${hours.toFixed(
+        1
+      )}h, above hard block ${DAILY_BLOCK_HOURS}h`;
+      violations.push({
+        rule: "daily_12_block",
+        message,
+      });
+      alerts.push({
+        type: "daily_12_block",
+        severity: "block",
+        message,
+        metadata: { date: dateLabel, projected_hours: Number(hours.toFixed(2)) },
+      });
+      return;
+    }
+    if (hours > DAILY_WARNING_HOURS) {
+      const message = `Projected daily hours on ${dateLabel} would be ${hours.toFixed(
+        1
+      )}h (warning threshold ${DAILY_WARNING_HOURS}h)`;
+      warnings.push({
+        rule: "daily_8_warning",
+        message,
+      });
+      alerts.push({
+        type: "daily_8_warning",
+        severity: "warning",
+        message,
+        metadata: { date: dateLabel, projected_hours: Number(hours.toFixed(2)) },
+      });
+    }
+  });
+
+  const longestStreak = getLongestConsecutiveStreak(workedDayLabels);
+  if (longestStreak >= 6) {
+    const warningMessage = `Projected consecutive-workday streak is ${longestStreak} day(s); day 6 warning threshold reached`;
+    warnings.push({
+      rule: "sixth_day_warning",
+      message: warningMessage,
+    });
+    alerts.push({
+      type: "sixth_day_warning",
+      severity: "warning",
+      message: warningMessage,
+      metadata: { projected_streak_days: longestStreak },
+    });
+  }
+
+  if (longestStreak >= 7 && !isSeventhDayOverrideValid(managerOverride)) {
+    const message =
+      "7th consecutive day requires manager override with override_type=seventh_consecutive_day and a documented reason";
+    violations.push({
+      rule: "seventh_day_override_required",
+      message,
+    });
+    alerts.push({
+      type: "seventh_day_override_required",
+      severity: "block",
+      message,
+      metadata: { projected_streak_days: longestStreak },
+    });
+  }
+
+  return {
+    warnings,
+    violations,
+    alerts,
+  };
+};
+
+const upsertLaborAlerts = async ({ userId, shiftId, assignmentId = null, alerts = [] }) => {
+  if (!alerts.length) {
+    await LaborAlert.updateMany(
+      {
+        user_id: userId,
+        shift_id: shiftId,
+        resolved_at: null,
+      },
+      { $set: { resolved_at: new Date() } }
+    );
+    return [];
+  }
+  const activeTypes = [];
+
+  const upserts = alerts.map(async (entry) => {
+    activeTypes.push(entry.type);
+    const filter = {
+      user_id: userId,
+      shift_id: shiftId,
+      type: entry.type,
+      resolved_at: null,
+    };
+    const update = {
+      $set: {
+        assignment_id: assignmentId || null,
+        severity: entry.severity,
+        message: entry.message,
+        metadata: entry.metadata || {},
+        resolved_at: null,
+      },
+      $setOnInsert: {
+        user_id: userId,
+        shift_id: shiftId,
+        type: entry.type,
+      },
+    };
+    return LaborAlert.findOneAndUpdate(filter, update, {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    });
+  });
+
+  const createdOrUpdated = await Promise.all(upserts);
+
+  if (activeTypes.length) {
+    await LaborAlert.updateMany(
+      {
+        user_id: userId,
+        shift_id: shiftId,
+        resolved_at: null,
+        type: { $nin: activeTypes },
+      },
+      { $set: { resolved_at: new Date() } }
+    );
+  }
+
+  return createdOrUpdated;
+};
+
 const getAssignedShifts = async (userId, excludeAssignmentId = null) => {
   const filter = { user_id: userId, status: "assigned" };
   if (excludeAssignmentId) {
@@ -532,8 +816,15 @@ const getAssignedShifts = async (userId, excludeAssignmentId = null) => {
   return assignments.map((entry) => entry.shift_id).filter(Boolean);
 };
 
-export const evaluateAssignmentRules = async ({ user, shift, excludeAssignmentId = null }) => {
+export const evaluateAssignmentRules = async ({
+  user,
+  shift,
+  excludeAssignmentId = null,
+  includeWarnings = false,
+  managerOverride = null,
+}) => {
   const violations = [];
+  const warnings = [];
 
   if (user.status !== "active" || user.is_active === false) {
     violations.push({
@@ -617,27 +908,24 @@ export const evaluateAssignmentRules = async ({ user, shift, excludeAssignmentId
     }
   }
 
-  const shiftTimezone = normalizeTimezone(shift.location_timezone);
-  const targetWeekBucket = getLocalWeekBucket(shift.starts_at_utc, shiftTimezone);
-  const weeklyHours = existingShifts.reduce((sum, existing) => {
-    const existingWeekBucket = getLocalWeekBucket(existing.starts_at_utc, shiftTimezone);
-    if (existingWeekBucket === targetWeekBucket) {
-      return sum + computeDurationHours(existing.starts_at_utc, existing.ends_at_utc);
-    }
-    return sum;
-  }, 0);
-  const projectedHours =
-    weeklyHours + computeDurationHours(shift.starts_at_utc, shift.ends_at_utc);
   const weeklyHoursLimit = preference?.max_hours_per_week || DEFAULT_WEEKLY_HOURS_LIMIT;
-  if (projectedHours > weeklyHoursLimit) {
-    violations.push({
-      rule: "weekly_overtime",
-      message: `Projected weekly hours would be ${projectedHours.toFixed(
-        1
-      )}, above limit ${weeklyHoursLimit}`,
-    });
-  }
+  const labor = buildLaborCompliance({
+    existingShifts,
+    shift,
+    weeklyHoursLimit,
+    managerOverride,
+  });
 
+  violations.push(...labor.violations);
+  warnings.push(...labor.warnings);
+
+  if (includeWarnings) {
+    return {
+      violations,
+      warnings,
+      labor_alerts: labor.alerts,
+    };
+  }
   return violations;
 };
 
@@ -1279,8 +1567,24 @@ export const createAssignment = asyncHandler(async (req, res) => {
       });
     }
 
-    const violations = await evaluateAssignmentRules({ user: assignedUser, shift });
+    const evaluated = await evaluateAssignmentRules({
+      user: assignedUser,
+      shift,
+      includeWarnings: true,
+      managerOverride: manager_override,
+    });
+    const violations = evaluated.violations || [];
+    const warnings = evaluated.warnings || [];
+    const laborAlerts = evaluated.labor_alerts || [];
+
     if (violations.length > 0) {
+      await upsertLaborAlerts({
+        userId: assignedUser._id,
+        shiftId: shift._id,
+        assignmentId: null,
+        alerts: laborAlerts,
+      });
+
       const suggestions = await buildAlternatives({
         shift,
         excludedUserIds: [assignedUser._id],
@@ -1291,6 +1595,8 @@ export const createAssignment = asyncHandler(async (req, res) => {
         success: false,
         message: "Assignment constraint violation",
         violations,
+        warnings,
+        labor_alerts: laborAlerts,
         suggestions,
         recommendations: suggestions,
       });
@@ -1316,6 +1622,20 @@ export const createAssignment = asyncHandler(async (req, res) => {
     const populated = await ShiftAssignment.findById(assignment._id).populate(
       "shift_id user_id assigned_by manager_override.approved_by"
     );
+    await logAuditChange({
+      actor_user_id: req.userId,
+      entity_type: "shift_assignment",
+      action: "create",
+      before_state: null,
+      after_state: assignment.toObject(),
+    });
+
+    const persistedLaborAlerts = await upsertLaborAlerts({
+      userId: assignedUser._id,
+      shiftId: shift._id,
+      assignmentId: assignment._id,
+      alerts: laborAlerts,
+    });
 
     await sendUserNotification({
       user_id: user_id,
@@ -1330,7 +1650,27 @@ export const createAssignment = asyncHandler(async (req, res) => {
       },
     });
 
-    return res.status(201).json({ success: true, data: populated });
+    if (warnings.length > 0) {
+      await sendUserNotification({
+        user_id: req.userId,
+        title: "Labor compliance warning",
+        message: warnings.map((item) => item.message).join(" | "),
+        category: "overtime_warning",
+        priority: "normal",
+        idempotency_key: `labor_warning_assignment:${assignment._id}:${req.userId}`,
+        data: {
+          shift_id: shift_id.toString(),
+          user_id: user_id.toString(),
+        },
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      data: populated,
+      warnings,
+      labor_alerts: persistedLaborAlerts,
+    });
   } finally {
     await releaseUserAssignmentLock(assignedUser._id);
   }
@@ -1500,13 +1840,26 @@ export const updateAssignment = asyncHandler(async (req, res) => {
   }
 
   try {
-    const violations = await evaluateAssignmentRules({
+    const managerOverrideInput = updateData.manager_override || assignment.manager_override;
+    const evaluated = await evaluateAssignmentRules({
       user: assignedUser,
       shift,
       excludeAssignmentId: assignment._id,
+      includeWarnings: true,
+      managerOverride: managerOverrideInput,
     });
+    const violations = evaluated.violations || [];
+    const warnings = evaluated.warnings || [];
+    const laborAlerts = evaluated.labor_alerts || [];
 
     if (violations.length > 0) {
+      await upsertLaborAlerts({
+        userId: assignedUser._id,
+        shiftId: shift._id,
+        assignmentId: assignment._id,
+        alerts: laborAlerts,
+      });
+
       const suggestions = await buildAlternatives({
         shift,
         excludedUserIds: [assignedUser._id],
@@ -1517,6 +1870,8 @@ export const updateAssignment = asyncHandler(async (req, res) => {
         success: false,
         message: "Assignment constraint violation",
         violations,
+        warnings,
+        labor_alerts: laborAlerts,
         suggestions,
         recommendations: suggestions,
       });
@@ -1530,6 +1885,20 @@ export const updateAssignment = asyncHandler(async (req, res) => {
         runValidators: true,
       }
     ).populate("shift_id user_id assigned_by manager_override.approved_by");
+    await logAuditChange({
+      actor_user_id: req.userId,
+      entity_type: "shift_assignment",
+      action: "update",
+      before_state: assignment.toObject(),
+      after_state: updated?.toObject ? updated.toObject() : updated,
+    });
+
+    const persistedLaborAlerts = await upsertLaborAlerts({
+      userId: assignedUser._id,
+      shiftId: shift._id,
+      assignmentId: assignment._id,
+      alerts: laborAlerts,
+    });
 
     if (String(nextUserId) !== String(assignment.user_id)) {
       await sendUserNotification({
@@ -1546,7 +1915,12 @@ export const updateAssignment = asyncHandler(async (req, res) => {
       });
     }
 
-    return res.json({ success: true, data: updated });
+    return res.json({
+      success: true,
+      data: updated,
+      warnings,
+      labor_alerts: persistedLaborAlerts,
+    });
   } finally {
     await releaseUserAssignmentLock(assignedUser._id);
   }
@@ -1590,6 +1964,13 @@ export const deleteAssignment = asyncHandler(async (req, res) => {
   }
 
   await ShiftAssignment.findByIdAndDelete(req.params.id);
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "delete",
+    before_state: assignment.toObject(),
+    after_state: null,
+  });
   return res.json({ success: true, message: "Assignment deleted" });
 });
 
@@ -1649,6 +2030,13 @@ export const clockInAssignment = asyncHandler(async (req, res) => {
     note: req.body?.note || "Clock in",
   });
   await assignment.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "clock_in",
+    before_state: null,
+    after_state: assignment.toObject(),
+  });
 
   await ClockEvent.create({
     user_id: assignment.user_id,
@@ -1724,6 +2112,13 @@ export const pauseAssignment = asyncHandler(async (req, res) => {
     note: reason,
   });
   await assignment.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "pause",
+    before_state: null,
+    after_state: assignment.toObject(),
+  });
 
   return res.json({ success: true, message: "Assignment paused", data: assignment });
 });
@@ -1795,6 +2190,13 @@ export const resumeAssignment = asyncHandler(async (req, res) => {
   });
 
   await assignment.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "resume",
+    before_state: null,
+    after_state: assignment.toObject(),
+  });
   return res.json({ success: true, message: "Assignment resumed", data: assignment });
 });
 
@@ -1863,6 +2265,13 @@ export const clockOutAssignment = asyncHandler(async (req, res) => {
     note: req.body?.note || "Clock out",
   });
   await assignment.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "clock_out",
+    before_state: null,
+    after_state: assignment.toObject(),
+  });
 
   await ClockEvent.create({
     user_id: assignment.user_id,
@@ -1967,6 +2376,14 @@ export const recoverMissingClockOut = asyncHandler(async (req, res) => {
   });
 
   await assignment.save();
+  await logAuditChange({
+    actor_user_id: req.userId,
+    entity_type: "shift_assignment",
+    action: "recover_clock_out",
+    before_state: null,
+    after_state: assignment.toObject(),
+    reason,
+  });
 
   await ClockEvent.create({
     user_id: assignment.user_id,
