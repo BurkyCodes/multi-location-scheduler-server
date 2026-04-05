@@ -210,6 +210,18 @@ export const updateSchedule = asyncHandler(async (req, res) => {
     }
   }
 
+  const latestBeforeWrite = await Schedule.findById(schedule._id);
+  if (!latestBeforeWrite) {
+    return res.status(404).json({ success: false, message: "Schedule not found" });
+  }
+  const lockedBeforeWrite = await isScheduleLockedByCutoff(latestBeforeWrite);
+  if (lockedBeforeWrite) {
+    return res.status(409).json({
+      success: false,
+      message: "Schedule cannot be edited because cutoff time has passed",
+    });
+  }
+
   const updated = await Schedule.findByIdAndUpdate(req.params.id, updateData, {
     new: true,
     runValidators: true,
@@ -239,6 +251,18 @@ export const deleteSchedule = asyncHandler(async (req, res) => {
     });
   }
 
+  const latestBeforeDelete = await Schedule.findById(schedule._id);
+  if (!latestBeforeDelete) {
+    return res.status(404).json({ success: false, message: "Schedule not found" });
+  }
+  const lockedBeforeDelete = await isScheduleLockedByCutoff(latestBeforeDelete);
+  if (lockedBeforeDelete) {
+    return res.status(409).json({
+      success: false,
+      message: "Schedule cannot be deleted because cutoff time has passed",
+    });
+  }
+
   await Schedule.findByIdAndDelete(req.params.id);
   return res.json({ success: true, message: "Schedule deleted" });
 });
@@ -253,6 +277,26 @@ export const publishSchedule = asyncHandler(async (req, res) => {
     return res.status(403).json({
       success: false,
       message: "Managers can only manage schedules for assigned locations",
+    });
+  }
+
+  const lockedByCutoff = await isScheduleLockedByCutoff(schedule);
+  if (lockedByCutoff) {
+    return res.status(409).json({
+      success: false,
+      message: "Schedule cannot be published because cutoff time has passed",
+    });
+  }
+
+  const latestBeforePublish = await Schedule.findById(schedule._id);
+  if (!latestBeforePublish) {
+    return res.status(404).json({ success: false, message: "Schedule not found" });
+  }
+  const lockedBeforePublish = await isScheduleLockedByCutoff(latestBeforePublish);
+  if (lockedBeforePublish) {
+    return res.status(409).json({
+      success: false,
+      message: "Schedule cannot be published because cutoff time has passed",
     });
   }
 
@@ -282,6 +326,18 @@ export const unpublishSchedule = asyncHandler(async (req, res) => {
 
   const lockedByCutoff = await isScheduleLockedByCutoff(schedule);
   if (lockedByCutoff) {
+    return res.status(409).json({
+      success: false,
+      message: "Schedule cannot be unpublished because cutoff time has passed",
+    });
+  }
+
+  const latestBeforeUnpublish = await Schedule.findById(schedule._id);
+  if (!latestBeforeUnpublish) {
+    return res.status(404).json({ success: false, message: "Schedule not found" });
+  }
+  const lockedBeforeUnpublish = await isScheduleLockedByCutoff(latestBeforeUnpublish);
+  if (lockedBeforeUnpublish) {
     return res.status(409).json({
       success: false,
       message: "Schedule cannot be unpublished because cutoff time has passed",

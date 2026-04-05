@@ -3,7 +3,9 @@ import Schedule from "../models/Schedule.js";
 import Location from "../models/Location.js";
 import Skill from "../models/Skill.js";
 import User from "../models/User.js";
+import ShiftAssignment from "../models/ShiftAssignment.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { evaluateAssignmentRules } from "./assignment.controller.js";
 import {
   getActiveUsersByRole,
   sendBulkNotifications,
@@ -307,6 +309,80 @@ export const updateShift = asyncHandler(async (req, res) => {
     updateData.location_timezone = normalizeTimezone(location.timezone);
   } else {
     updateData.location_timezone = normalizeTimezone(shift.location_timezone);
+  }
+
+  const projectedHeadcount =
+    updateData.headcount_required ?? shift.headcount_required;
+  const assignedCount = await ShiftAssignment.countDocuments({
+    shift_id: shift._id,
+    status: "assigned",
+  });
+  if (projectedHeadcount < assignedCount) {
+    return res.status(409).json({
+      success: false,
+      message: `headcount_required (${projectedHeadcount}) cannot be below assigned staff count (${assignedCount})`,
+      data: {
+        assigned_count: assignedCount,
+        requested_headcount: projectedHeadcount,
+      },
+    });
+  }
+
+  const projectedShift = {
+    _id: shift._id,
+    location_id: updateData.location_id || shift.location_id,
+    required_skill_id: updateData.required_skill_id || shift.required_skill_id,
+    location_timezone: updateData.location_timezone || shift.location_timezone,
+    starts_at_utc: updateData.starts_at_utc || shift.starts_at_utc,
+    ends_at_utc: updateData.ends_at_utc || shift.ends_at_utc,
+  };
+
+  const activeAssignments = await ShiftAssignment.find({
+    shift_id: shift._id,
+    status: "assigned",
+  }).populate({
+    path: "user_id",
+    select: "name phone_number email role_id status is_active",
+    populate: { path: "role_id", select: "role" },
+  });
+
+  const impactedAssignments = [];
+  for (const assignment of activeAssignments) {
+    if (!assignment.user_id) {
+      impactedAssignments.push({
+        assignment_id: assignment._id,
+        user_id: assignment.user_id,
+        violations: [{ rule: "user_missing", message: "Assigned staff user not found" }],
+      });
+      continue;
+    }
+
+    const violations = await evaluateAssignmentRules({
+      user: assignment.user_id,
+      shift: projectedShift,
+      excludeAssignmentId: assignment._id,
+    });
+
+    if (violations.length) {
+      impactedAssignments.push({
+        assignment_id: assignment._id,
+        user_id: assignment.user_id._id,
+        name:
+          assignment.user_id.name ||
+          assignment.user_id.email ||
+          assignment.user_id.phone_number,
+        violations,
+      });
+    }
+  }
+
+  if (impactedAssignments.length) {
+    return res.status(409).json({
+      success: false,
+      message:
+        "Shift update would invalidate one or more existing assignments. Reassign or edit assignments first.",
+      impacted_assignments: impactedAssignments,
+    });
   }
 
   const updated = await Shift.findByIdAndUpdate(req.params.id, updateData, {

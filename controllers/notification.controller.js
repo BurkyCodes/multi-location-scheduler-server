@@ -84,6 +84,7 @@ export const sendNotification = asyncHandler(async (req, res) => {
     icon,
     data = {},
     channels = ["in-app"],
+    idempotency_key = null,
   } = req.body;
 
   const org_user_id = bodyOrgUserId || req.userOrgId;
@@ -102,6 +103,26 @@ export const sendNotification = asyncHandler(async (req, res) => {
   const results = {};
 
   if (channels.includes("in-app")) {
+    if (idempotency_key) {
+      const dedupeFilter = {
+        idempotency_key,
+        status: { $ne: "deleted" },
+      };
+      if (user_id) {
+        dedupeFilter.user_id = user_id;
+      } else if (org_user_id) {
+        dedupeFilter.org_user_id = org_user_id;
+      }
+
+      const existing = await Notification.findOne({
+        ...dedupeFilter,
+      });
+      if (existing) {
+        results["in-app"] = { status: "deduplicated", notification_id: existing._id };
+      }
+    }
+
+    if (!results["in-app"]) {
     const saved = await Notification.create({
       org_user_id,
       user_id,
@@ -114,11 +135,13 @@ export const sendNotification = asyncHandler(async (req, res) => {
       link,
       icon,
       data,
+      idempotency_key,
       delivery_status: "sent",
       status: "unread",
     });
 
     results["in-app"] = { status: "sent", notification_id: saved._id };
+    }
   }
 
   if (channels.includes("push")) {

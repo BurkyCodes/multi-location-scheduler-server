@@ -73,6 +73,11 @@ const notificationSchema = new Schema(
       type: Schema.Types.Mixed,
       default: {},
     },
+    idempotency_key: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     icon: {
       type: String,
     },
@@ -102,5 +107,14 @@ const notificationSchema = new Schema(
 notificationSchema.index({ user_id: 1, createdAt: -1 });
 notificationSchema.index({ user_id: 1, read_at: 1 });
 notificationSchema.index({ org_user_id: 1, status: 1, createdAt: -1 });
+notificationSchema.index(
+  { user_id: 1, idempotency_key: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      idempotency_key: { $type: "string" },
+    },
+  }
+);
 
 export default mongoose.model("notifications", notificationSchema);

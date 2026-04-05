@@ -96,6 +96,8 @@ const weekdayLabel = (weekday) => {
   return names[weekday] || String(weekday);
 };
 
+const previousWeekday = (weekday) => (weekday + 6) % 7;
+
 const overlapByMinutes = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
 const containsByMinutes = (outerStart, outerEnd, innerStart, innerEnd) =>
@@ -174,11 +176,7 @@ const hasRecurringCoverage = (
   timezone
 ) => {
   return recurringWindows.some((window) => {
-    if (
-      window.weekday !== weekday ||
-      !matchesEntryLocation(window, locationId) ||
-      !matchesNormalizedTimezone(window, timezone)
-    ) {
+    if (!matchesEntryLocation(window, locationId) || !matchesNormalizedTimezone(window, timezone)) {
       return false;
     }
 
@@ -188,12 +186,24 @@ const hasRecurringCoverage = (
       return false;
     }
 
-    if (windowEnd > windowStart) {
+    // Same-day availability window.
+    if (window.weekday === weekday && windowEnd > windowStart) {
       return containsByMinutes(windowStart, windowEnd, segStart, segEnd);
     }
 
     // Overnight recurring window, e.g. 22:00-06:00.
-    return containsByMinutes(windowStart, 1440, segStart, segEnd);
+    if (windowEnd <= windowStart) {
+      // Coverage on the window's own day: start -> 24:00.
+      if (window.weekday === weekday) {
+        return containsByMinutes(windowStart, 1440, segStart, segEnd);
+      }
+      // Carry-over coverage on next day: 00:00 -> end.
+      if (window.weekday === previousWeekday(weekday)) {
+        return containsByMinutes(0, windowEnd, segStart, segEnd);
+      }
+    }
+
+    return false;
   });
 };
 
@@ -223,11 +233,7 @@ const getRecurringCoverageIntervals = (
 ) => {
   const intervals = [];
   recurringWindows.forEach((window) => {
-    if (
-      window.weekday !== weekday ||
-      !matchesEntryLocation(window, locationId) ||
-      !matchesNormalizedTimezone(window, timezone)
-    ) {
+    if (!matchesEntryLocation(window, locationId) || !matchesNormalizedTimezone(window, timezone)) {
       return;
     }
 
@@ -236,17 +242,29 @@ const getRecurringCoverageIntervals = (
     if (windowStart === null || windowEnd === null) return;
 
     // Same-day window.
-    if (windowEnd > windowStart) {
+    if (window.weekday === weekday && windowEnd > windowStart) {
       const start = Math.max(segStart, windowStart);
       const end = Math.min(segEnd, windowEnd);
       if (end > start) intervals.push({ start, end });
       return;
     }
 
-    // Overnight recurring window contributes current-day coverage from start -> 24:00.
-    const start = Math.max(segStart, windowStart);
-    const end = Math.min(segEnd, 1440);
-    if (end > start) intervals.push({ start, end });
+    if (windowEnd <= windowStart) {
+      // Overnight recurring window contributes current-day coverage from start -> 24:00.
+      if (window.weekday === weekday) {
+        const start = Math.max(segStart, windowStart);
+        const end = Math.min(segEnd, 1440);
+        if (end > start) intervals.push({ start, end });
+        return;
+      }
+
+      // Carry-over segment from previous weekday overnight window: 00:00 -> end.
+      if (window.weekday === previousWeekday(weekday)) {
+        const start = Math.max(segStart, 0);
+        const end = Math.min(segEnd, windowEnd);
+        if (end > start) intervals.push({ start, end });
+      }
+    }
   });
 
   return mergeIntervals(intervals);
@@ -487,17 +505,13 @@ const evaluateAvailability = (availability, shift) => {
   return null;
 };
 
-const getUtcWeekRange = (dateValue) => {
-  const date = new Date(dateValue);
-  const day = date.getUTCDay(); // 0=Sun
-  const diffToMonday = (day + 6) % 7;
-  const weekStart = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  );
-  weekStart.setUTCDate(weekStart.getUTCDate() - diffToMonday);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
-  return { weekStart, weekEnd };
+const getLocalWeekBucket = (dateValue, timezone) => {
+  const local = getLocalParts(dateValue, timezone);
+  const [year, month, day] = local.date.split("-").map(Number);
+  const localDate = new Date(Date.UTC(year, month - 1, day));
+  const diffToMonday = (local.weekday + 6) % 7;
+  localDate.setUTCDate(localDate.getUTCDate() - diffToMonday);
+  return localDate.toISOString().slice(0, 10);
 };
 
 const computeDurationHours = (startsAt, endsAt) => {
@@ -603,10 +617,11 @@ export const evaluateAssignmentRules = async ({ user, shift, excludeAssignmentId
     }
   }
 
-  const { weekStart, weekEnd } = getUtcWeekRange(shift.starts_at_utc);
+  const shiftTimezone = normalizeTimezone(shift.location_timezone);
+  const targetWeekBucket = getLocalWeekBucket(shift.starts_at_utc, shiftTimezone);
   const weeklyHours = existingShifts.reduce((sum, existing) => {
-    const start = new Date(existing.starts_at_utc);
-    if (start >= weekStart && start < weekEnd) {
+    const existingWeekBucket = getLocalWeekBucket(existing.starts_at_utc, shiftTimezone);
+    if (existingWeekBucket === targetWeekBucket) {
       return sum + computeDurationHours(existing.starts_at_utc, existing.ends_at_utc);
     }
     return sum;
@@ -1308,6 +1323,7 @@ export const createAssignment = asyncHandler(async (req, res) => {
       message: "You have been assigned a new shift.",
       category: "shift_assigned",
       priority: "high",
+      idempotency_key: `shift_assigned:${assignment._id}:${user_id}`,
       data: {
         assignment_id: assignment._id.toString(),
         shift_id: shift_id.toString(),
@@ -1522,6 +1538,7 @@ export const updateAssignment = asyncHandler(async (req, res) => {
         message: "A shift has been reassigned to you.",
         category: "shift_assigned",
         priority: "high",
+        idempotency_key: `shift_reassigned:${updated._id}:${nextUserId}`,
         data: {
           assignment_id: updated._id.toString(),
           shift_id: shift._id.toString(),
@@ -1857,4 +1874,112 @@ export const clockOutAssignment = asyncHandler(async (req, res) => {
   });
 
   return res.json({ success: true, message: "Clocked out successfully", data: assignment });
+});
+
+export const recoverMissingClockOut = asyncHandler(async (req, res) => {
+  const assignment = await ShiftAssignment.findById(req.params.id).populate({
+    path: "shift_id",
+    select: "location_id starts_at_utc ends_at_utc",
+  });
+
+  if (!assignment || !assignment.shift_id) {
+    return res.status(404).json({ success: false, message: "Assignment not found" });
+  }
+
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  if (
+    currentUser.role_id?.role !== "manager" ||
+    !hasLocationAccess(currentUser, assignment.shift_id.location_id)
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: "Only managers for this location can recover missing clock-out events",
+    });
+  }
+
+  const reason = (req.body?.reason || "").trim();
+  if (!reason) {
+    return res.status(400).json({
+      success: false,
+      message: "reason is required for missing clock-out recovery",
+    });
+  }
+
+  const lastSession = getLatestWorkSession(assignment);
+  if (!lastSession || lastSession.clock_out_utc) {
+    return res.status(409).json({
+      success: false,
+      message: "No active work session requires recovery",
+    });
+  }
+
+  const eventTime = req.body?.clock_out_utc ? new Date(req.body.clock_out_utc) : new Date();
+  if (Number.isNaN(eventTime.getTime())) {
+    return res.status(400).json({
+      success: false,
+      message: "clock_out_utc must be a valid ISO datetime when provided",
+    });
+  }
+
+  const clockInTime = new Date(lastSession.clock_in_utc);
+  if (eventTime <= clockInTime) {
+    return res.status(409).json({
+      success: false,
+      message: "Recovered clock_out_utc must be after clock_in_utc",
+    });
+  }
+
+  if (assignment.active_pause?.started_at_utc) {
+    const pauseStart = new Date(assignment.active_pause.started_at_utc);
+    const pauseEnd = eventTime > pauseStart ? eventTime : pauseStart;
+    const pauseMinutes = Math.max(
+      0,
+      Math.round((pauseEnd.getTime() - pauseStart.getTime()) / 60000)
+    );
+
+    lastSession.paused_minutes = (lastSession.paused_minutes || 0) + pauseMinutes;
+    assignment.pause_history.push({
+      started_at_utc: pauseStart,
+      ended_at_utc: pauseEnd,
+      reason: assignment.active_pause?.reason || "Pause",
+      duration_minutes: pauseMinutes,
+    });
+    assignment.active_pause = undefined;
+  }
+
+  lastSession.clock_out_utc = eventTime;
+  lastSession.duration_minutes = Math.max(
+    0,
+    Math.round((eventTime.getTime() - clockInTime.getTime()) / 60000) -
+      (lastSession.paused_minutes || 0)
+  );
+
+  assignment.work_status = "clocked_out";
+  assignment.activity_log.push({
+    type: "clock_out",
+    actor_user_id: req.userId,
+    at_utc: new Date(),
+    note: `Recovered missing clock-out: ${reason}`,
+  });
+
+  await assignment.save();
+
+  await ClockEvent.create({
+    user_id: assignment.user_id,
+    shift_id: assignment.shift_id._id,
+    location_id: assignment.shift_id.location_id,
+    type: "clock_out",
+    event_at_utc: eventTime,
+    source: "manager",
+  });
+
+  return res.json({
+    success: true,
+    message: "Missing clock-out recovered successfully",
+    data: assignment,
+  });
 });

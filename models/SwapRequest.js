@@ -14,6 +14,7 @@ const swapRequestSchema = new Schema(
       enum: [
         "pending_peer_acceptance",
         "pending_manager_approval",
+        "processing",
         "approved",
         "rejected",
         "cancelled",

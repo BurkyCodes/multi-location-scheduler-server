@@ -11,6 +11,7 @@ import {
   getMyShiftTracking,
   getWorkedHoursAnalytics,
   pauseAssignment,
+  recoverMissingClockOut,
   resumeAssignment,
   updateAssignment,
 } from "../controllers/assignment.controller.js";
@@ -29,6 +30,7 @@ router.post("/:id/clock-in", checkAuthentication, clockInAssignment);
 router.post("/:id/pause", checkAuthentication, pauseAssignment);
 router.post("/:id/resume", checkAuthentication, resumeAssignment);
 router.post("/:id/clock-out", checkAuthentication, clockOutAssignment);
+router.post("/:id/recover-clock-out", checkAuthentication, requireManager, recoverMissingClockOut);
 router.post("/", checkAuthentication, requireManager, createAssignment);
 router.patch("/:id", checkAuthentication, requireManager, updateAssignment);
 router.delete("/:id", checkAuthentication, requireManager, deleteAssignment);

@@ -24,10 +24,27 @@ export const sendUserNotification = async ({
   icon,
   data = {},
   type = "in-app",
+  idempotency_key = null,
 }) => {
   const userId = toIdString(user_id);
   if (!userId) {
     return { status: "skipped", reason: "Missing user_id" };
+  }
+
+  if (idempotency_key) {
+    const existing = await Notification.findOne({
+      user_id: userId,
+      idempotency_key,
+      status: { $ne: "deleted" },
+    });
+    if (existing) {
+      return {
+        in_app: {
+          status: "deduplicated",
+          notification_id: existing._id,
+        },
+      };
+    }
   }
 
   const notification = await Notification.create({
@@ -41,6 +58,7 @@ export const sendUserNotification = async ({
     link,
     icon,
     data,
+    idempotency_key,
     delivery_status: "sent",
     status: "unread",
   });

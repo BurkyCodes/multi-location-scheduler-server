@@ -356,12 +356,30 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
     }
   }
 
-  swapRequest.claimed_by_user_id = currentUser._id;
-  if (!swapRequest.target_user_id) {
-    swapRequest.target_user_id = currentUser._id;
+  const acceptedSwapRequest = await SwapRequest.findOneAndUpdate(
+    {
+      _id: swapRequest._id,
+      status: "pending_peer_acceptance",
+      ...(swapRequest.target_user_id
+        ? { target_user_id: swapRequest.target_user_id }
+        : {}),
+    },
+    {
+      $set: {
+        claimed_by_user_id: currentUser._id,
+        target_user_id: swapRequest.target_user_id || currentUser._id,
+        status: "pending_manager_approval",
+      },
+    },
+    { new: true }
+  );
+
+  if (!acceptedSwapRequest) {
+    return res.status(409).json({
+      success: false,
+      message: "Swap request was updated by another user. Please refresh and retry.",
+    });
   }
-  swapRequest.status = "pending_manager_approval";
-  await swapRequest.save();
 
   await sendUserNotification({
     user_id: swapRequest.requester_id,
@@ -369,14 +387,21 @@ export const acceptSwapRequest = asyncHandler(async (req, res) => {
     message: "Your swap request was accepted and is waiting for manager approval.",
     category: "swap_updated",
     priority: "normal",
+    idempotency_key: `swap_accept:${acceptedSwapRequest._id}:${currentUser._id}`,
     data: {
-      swap_request_id: swapRequest._id.toString(),
+      swap_request_id: acceptedSwapRequest._id.toString(),
       accepted_by_user_id: currentUser._id.toString(),
     },
   });
 
-  return res.json({ success: true, data: swapRequest });
+  return res.json({ success: true, data: acceptedSwapRequest });
 });
+
+const releaseProcessingSwapRequest = async (swapRequestId) => {
+  await SwapRequest.findByIdAndUpdate(swapRequestId, {
+    $set: { status: "pending_manager_approval", manager_id: null },
+  });
+};
 
 export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   const { approve, manager_id } = req.body;
@@ -388,7 +413,20 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     });
   }
 
-  const swapRequest = await SwapRequest.findById(req.params.id)
+  const actorId = manager_id || req.userId;
+  const swapRequest = await SwapRequest.findOneAndUpdate(
+    {
+      _id: req.params.id,
+      status: "pending_manager_approval",
+    },
+    {
+      $set: {
+        status: "processing",
+        manager_id: actorId,
+      },
+    },
+    { new: true }
+  )
     .populate({
       path: "from_assignment_id",
       populate: assignmentShiftPopulate,
@@ -399,19 +437,18 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     });
 
   if (!swapRequest) {
-    return res.status(404).json({ success: false, message: "Swap request not found" });
-  }
-
-  if (!ensurePending(swapRequest, "pending_manager_approval")) {
+    const existing = await SwapRequest.findById(req.params.id).select("_id status");
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Swap request not found" });
+    }
     return res.status(409).json({
       success: false,
-      message: "Manager decision allowed only when status is pending_manager_approval",
+      message: `Swap request is already ${existing.status}`,
     });
   }
 
   if (isExpired(swapRequest)) {
     swapRequest.status = "expired";
-    swapRequest.manager_id = manager_id || req.userId;
     await swapRequest.save();
     return res.status(409).json({
       success: false,
@@ -421,7 +458,6 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
 
   if (!approve) {
     swapRequest.status = "rejected";
-    swapRequest.manager_id = manager_id || req.userId;
     await swapRequest.save();
     await sendBulkNotifications([swapRequest.requester_id, swapRequest.claimed_by_user_id], {
       title: "Swap request rejected",
@@ -437,6 +473,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
 
   const fromAssignment = swapRequest.from_assignment_id;
   if (!fromAssignment || !fromAssignment.shift_id) {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(404).json({
       success: false,
       message: "Original assignment or shift not found",
@@ -444,6 +481,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   }
 
   if (fromAssignment.status !== "assigned") {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(409).json({
       success: false,
       message: "Original assignment is no longer active",
@@ -451,6 +489,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   }
 
   if (toId(fromAssignment.user_id) !== toId(swapRequest.requester_id)) {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(409).json({
       success: false,
       message: "Original assignment no longer belongs to requester",
@@ -459,6 +498,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
 
   const incomingUserId = swapRequest.claimed_by_user_id || swapRequest.target_user_id;
   if (!incomingUserId) {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(409).json({
       success: false,
       message: "No accepting staff assigned to this swap request",
@@ -471,6 +511,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   ]);
 
   if (!incomingUser || !requesterUser) {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(404).json({
       success: false,
       message: "Requester or accepting staff not found",
@@ -483,6 +524,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     excludeAssignmentId: fromAssignment._id,
   });
   if (incomingViolations.length > 0) {
+    await releaseProcessingSwapRequest(swapRequest._id);
     return res.status(409).json({
       success: false,
       message: "Accepting staff no longer satisfies assignment constraints",
@@ -494,6 +536,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   if (swapRequest.type === "swap" && swapRequest.requested_assignment_id) {
     requestedAssignment = swapRequest.requested_assignment_id;
     if (!requestedAssignment || !requestedAssignment.shift_id) {
+      await releaseProcessingSwapRequest(swapRequest._id);
       return res.status(404).json({
         success: false,
         message: "Requested assignment or shift not found",
@@ -501,6 +544,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     }
 
     if (requestedAssignment.status !== "assigned") {
+      await releaseProcessingSwapRequest(swapRequest._id);
       return res.status(409).json({
         success: false,
         message: "Requested assignment is no longer active",
@@ -508,6 +552,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     }
 
     if (toId(requestedAssignment.user_id) !== toId(incomingUser._id)) {
+      await releaseProcessingSwapRequest(swapRequest._id);
       return res.status(409).json({
         success: false,
         message: "Requested assignment no longer belongs to accepting staff",
@@ -521,6 +566,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     });
 
     if (requesterViolations.length > 0) {
+      await releaseProcessingSwapRequest(swapRequest._id);
       return res.status(409).json({
         success: false,
         message: "Requester no longer satisfies assignment constraints for requested shift",
@@ -529,7 +575,6 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     }
   }
 
-  const actorId = manager_id || req.userId;
   const now = new Date();
 
   fromAssignment.user_id = incomingUser._id;
@@ -576,7 +621,6 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
   }
 
   swapRequest.status = "approved";
-  swapRequest.manager_id = actorId;
   await swapRequest.save();
 
   await sendUserNotification({
@@ -585,6 +629,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     message: "Your swap request was approved.",
     category: "swap_updated",
     priority: "high",
+    idempotency_key: `swap_approved:${swapRequest._id}:${requesterUser._id}`,
     data: {
       swap_request_id: swapRequest._id.toString(),
       assignment_id: fromAssignment._id.toString(),
@@ -596,6 +641,7 @@ export const managerDecisionSwapRequest = asyncHandler(async (req, res) => {
     message: "A manager approved the swap and assigned the shift to you.",
     category: "shift_assigned",
     priority: "high",
+    idempotency_key: `swap_assignment:${swapRequest._id}:${incomingUser._id}`,
     data: {
       swap_request_id: swapRequest._id.toString(),
       assignment_id: fromAssignment._id.toString(),
