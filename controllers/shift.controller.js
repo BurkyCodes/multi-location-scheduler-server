@@ -4,11 +4,13 @@ import Location from "../models/Location.js";
 import Skill from "../models/Skill.js";
 import User from "../models/User.js";
 import ShiftAssignment from "../models/ShiftAssignment.js";
+import SwapRequest from "../models/SwapRequest.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { evaluateAssignmentRules } from "./assignment.controller.js";
 import {
   getActiveUsersByRole,
   sendBulkNotifications,
+  sendBulkNotifications as notifyBulk,
 } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
 import {
@@ -66,6 +68,80 @@ const toShiftResponse = (shift) => {
     starts_at_local: formatInTimezone(data.starts_at_utc, safeTimezone),
     ends_at_local: formatInTimezone(data.ends_at_utc, safeTimezone),
   };
+};
+
+const PENDING_SWAP_STATUSES = [
+  "pending_peer_acceptance",
+  "pending_manager_approval",
+  "processing",
+];
+
+const cancelPendingSwapRequestsForShift = async ({ shiftId, actorUserId }) => {
+  const assignmentIds = (
+    await ShiftAssignment.find({ shift_id: shiftId }).select("_id")
+  ).map((item) => item._id);
+  if (!assignmentIds.length) return { cancelled_count: 0 };
+
+  const pendingRequests = await SwapRequest.find({
+    status: { $in: PENDING_SWAP_STATUSES },
+    $or: [
+      { from_assignment_id: { $in: assignmentIds } },
+      { requested_assignment_id: { $in: assignmentIds } },
+    ],
+  });
+
+  if (!pendingRequests.length) return { cancelled_count: 0 };
+
+  const cancelledIds = pendingRequests.map((item) => item._id);
+  await SwapRequest.updateMany(
+    { _id: { $in: cancelledIds } },
+    {
+      $set: {
+        status: "cancelled",
+        cancelled_reason:
+          "Automatically cancelled because related shift was edited by manager",
+      },
+    }
+  );
+
+  for (const request of pendingRequests) {
+    const notifyIds = [
+      request.requester_id,
+      request.target_user_id,
+      request.claimed_by_user_id,
+      request.manager_id,
+    ]
+      .filter(Boolean)
+      .map((id) => id.toString());
+    const uniqueNotifyIds = [...new Set(notifyIds)];
+    if (uniqueNotifyIds.length) {
+      await notifyBulk(uniqueNotifyIds, {
+        title: "Swap request cancelled",
+        message: "Related shift was edited. Pending swap/drop was cancelled.",
+        category: "swap_updated",
+        priority: "normal",
+        data: {
+          shift_id: shiftId.toString(),
+          swap_request_ids: cancelledIds.map((id) => id.toString()).join(","),
+        },
+      });
+    }
+
+    await logAuditChange({
+      actor_user_id: actorUserId,
+      entity_type: "swap_request",
+      action: "auto_cancel_shift_edited",
+      before_state: request.toObject(),
+      after_state: {
+        ...request.toObject(),
+        status: "cancelled",
+        cancelled_reason:
+          "Automatically cancelled because related shift was edited by manager",
+      },
+    });
+  }
+
+  return { cancelled_count: cancelledIds.length };
 };
 
 export const createShift = asyncHandler(async (req, res) => {
@@ -398,6 +474,10 @@ export const updateShift = asyncHandler(async (req, res) => {
     new: true,
     runValidators: true,
   }).populate("schedule_id location_id required_skill_id created_by updated_by");
+  const cancelledSwapSummary = await cancelPendingSwapRequestsForShift({
+    shiftId: shift._id,
+    actorUserId: req.userId,
+  });
 
   await logAuditChange({
     actor_user_id: req.userId,
@@ -407,7 +487,11 @@ export const updateShift = asyncHandler(async (req, res) => {
     after_state: updated?.toObject ? updated.toObject() : updated,
   });
 
-  return res.json({ success: true, data: toShiftResponse(updated) });
+  return res.json({
+    success: true,
+    data: toShiftResponse(updated),
+    auto_cancelled_pending_swap_requests: cancelledSwapSummary.cancelled_count,
+  });
 });
 
 export const deleteShift = asyncHandler(async (req, res) => {

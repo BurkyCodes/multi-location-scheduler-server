@@ -120,17 +120,11 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
     });
   }
 
-  if (toId(fromAssignment.user_id) !== toId(requester_id)) {
+  const isOwner = toId(fromAssignment.user_id) === toId(requester_id);
+  if (["swap", "drop"].includes(type) && !isOwner) {
     return res.status(409).json({
       success: false,
-      message: "Only the owner of the original assignment can request a swap",
-    });
-  }
-
-  if (type === "pickup") {
-    return res.status(400).json({
-      success: false,
-      message: "pickup requests are created by accepting a drop request, not via create endpoint",
+      message: "Only the owner of the original assignment can request a swap/drop",
     });
   }
 
@@ -146,6 +140,138 @@ export const createSwapRequest = asyncHandler(async (req, res) => {
         message: `You already have ${pendingCount} pending swap/drop requests. Maximum allowed is ${MAX_PENDING_SWAP_DROP_REQUESTS}.`,
       });
     }
+  }
+
+  if (type === "pickup") {
+    if (isOwner) {
+      return res.status(409).json({
+        success: false,
+        message: "You cannot pickup your own assignment",
+      });
+    }
+
+    const existingPendingPickup = await SwapRequest.findOne({
+      type: "pickup",
+      requester_id,
+      from_assignment_id,
+      status: { $in: PENDING_SWAP_STATUSES },
+    });
+    if (existingPendingPickup) {
+      return res.status(409).json({
+        success: false,
+        message: "You already have a pending pickup request for this shift",
+      });
+    }
+
+    const activeDropRequest = await SwapRequest.findOne({
+      type: "drop",
+      from_assignment_id,
+      status: "pending_peer_acceptance",
+    });
+    if (!activeDropRequest) {
+      return res.status(409).json({
+        success: false,
+        message: "This shift is not currently offered as an active drop request",
+      });
+    }
+
+    if (isExpired(activeDropRequest)) {
+      activeDropRequest.status = "expired";
+      await activeDropRequest.save();
+      return res.status(409).json({
+        success: false,
+        message: "Drop request has expired",
+      });
+    }
+
+    if (
+      shouldAutoExpireDrop({
+        swapRequest: activeDropRequest,
+        shiftStartsAtUtc: fromAssignment.shift_id.starts_at_utc,
+      })
+    ) {
+      activeDropRequest.status = "expired";
+      await activeDropRequest.save();
+      return res.status(409).json({
+        success: false,
+        message: "Drop request has expired (24 hours before shift start)",
+      });
+    }
+
+    const picker = await getUserWithRole(requester_id);
+    if (!picker || picker.role_id?.role !== "staff") {
+      return res.status(404).json({
+        success: false,
+        message: "Pickup requester must be an active staff user",
+      });
+    }
+
+    const violations = await evaluateAssignmentRules({
+      user: picker,
+      shift: fromAssignment.shift_id,
+      excludeAssignmentId: fromAssignment._id,
+    });
+    if (violations.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Pickup request constraint violation",
+        violations,
+      });
+    }
+
+    const pickupDoc = await SwapRequest.create({
+      type: "pickup",
+      requester_id,
+      from_assignment_id,
+      target_user_id: requester_id,
+      claimed_by_user_id: requester_id,
+      expires_at: normalizeSwapExpiry({
+        type: "drop",
+        providedExpiresAt: expires_at || activeDropRequest.expires_at,
+        shiftStartsAtUtc: fromAssignment.shift_id.starts_at_utc,
+      }),
+      note,
+      status: "pending_manager_approval",
+    });
+
+    await logAuditChange({
+      actor_user_id: req.userId,
+      entity_type: "swap_request",
+      action: "create_pickup",
+      after_state: pickupDoc.toObject(),
+    });
+
+    await sendUserNotification({
+      user_id: fromAssignment.user_id,
+      title: "Shift pickup requested",
+      message: "A staff member requested to pick up your dropped shift.",
+      category: "swap_updated",
+      priority: "normal",
+      data: {
+        swap_request_id: pickupDoc._id.toString(),
+        from_assignment_id: from_assignment_id.toString(),
+      },
+    });
+
+    const managers = await getActiveManagersForLocation(fromAssignment.shift_id.location_id);
+    await sendBulkNotifications(
+      managers.map((item) => item._id),
+      {
+        title: "Pickup request awaiting approval",
+        message: "A direct pickup request is waiting for manager approval.",
+        category: "swap_requested",
+        priority: "normal",
+        data: {
+          swap_request_id: pickupDoc._id.toString(),
+          from_assignment_id: from_assignment_id.toString(),
+        },
+      }
+    );
+
+    const populatedPickup = await SwapRequest.findById(pickupDoc._id).populate(
+      "requester_id from_assignment_id target_user_id requested_assignment_id claimed_by_user_id manager_id"
+    );
+    return res.status(201).json({ success: true, data: populatedPickup });
   }
 
   const doc = await SwapRequest.create({
@@ -316,9 +442,40 @@ export const updateSwapRequest = asyncHandler(async (req, res) => {
   return res.json({ success: true, data: updated });
 });
 
-export const getSwapRequests = asyncHandler(async (_req, res) => {
+export const getSwapRequests = asyncHandler(async (req, res) => {
+  const currentUser = await getUserWithRole(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   await expireUnclaimedDropRequests();
-  const docs = await SwapRequest.find()
+  const role = currentUser.role_id?.role;
+  const filter = {};
+  if (role === "staff") {
+    filter.$or = [
+      { requester_id: currentUser._id },
+      { target_user_id: currentUser._id },
+      { claimed_by_user_id: currentUser._id },
+    ];
+  } else if (role === "manager") {
+    const managerShiftIds = (
+      await ShiftAssignment.find()
+        .populate({
+          path: "shift_id",
+          select: "location_id",
+          match: { location_id: { $in: currentUser.location_ids || [] } },
+        })
+        .select("_id shift_id")
+    )
+      .filter((item) => item.shift_id)
+      .map((item) => item._id);
+    filter.$or = [
+      { from_assignment_id: { $in: managerShiftIds } },
+      { requested_assignment_id: { $in: managerShiftIds } },
+    ];
+  }
+
+  const docs = await SwapRequest.find(filter)
     .populate("requester_id target_user_id requested_assignment_id claimed_by_user_id manager_id")
     .populate({
       path: "from_assignment_id",
@@ -340,6 +497,11 @@ export const getSwapRequests = asyncHandler(async (_req, res) => {
 });
 
 export const getSwapRequestById = asyncHandler(async (req, res) => {
+  const currentUser = await getUserWithRole(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
   await expireUnclaimedDropRequests();
   const doc = await SwapRequest.findById(req.params.id)
     .populate("requester_id target_user_id requested_assignment_id claimed_by_user_id manager_id")
@@ -360,6 +522,37 @@ export const getSwapRequestById = asyncHandler(async (req, res) => {
 
   if (!doc) {
     return res.status(404).json({ success: false, message: "Swap request not found" });
+  }
+
+  const role = currentUser.role_id?.role;
+  if (role === "staff") {
+    const isRelated = [doc.requester_id, doc.target_user_id, doc.claimed_by_user_id]
+      .filter(Boolean)
+      .some((id) => toId(id) === toId(currentUser._id));
+    if (!isRelated) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+  } else if (role === "manager") {
+    const assignmentIds = [doc.from_assignment_id, doc.requested_assignment_id]
+      .filter(Boolean)
+      .map((item) => toId(item));
+    if (!assignmentIds.length) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    const managerAssignments = await ShiftAssignment.find({
+      _id: { $in: assignmentIds },
+    }).populate({
+      path: "shift_id",
+      select: "location_id",
+    });
+    const hasManagerAccess = managerAssignments.some((item) =>
+      currentUser.location_ids.some(
+        (locId) => toId(locId) === toId(item?.shift_id?.location_id)
+      )
+    );
+    if (!hasManagerAccess) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
   }
 
   return res.json({ success: true, data: doc });

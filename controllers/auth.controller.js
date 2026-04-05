@@ -400,6 +400,19 @@ export const getUserDetailsById = asyncHandler(async (req, res) => {
   const { user_id, garage_id } = req.params;
   const { fromDate, toDate } = req.query;
 
+  const requester = await User.findById(req.userId).populate({
+    path: "role_id",
+    select: "role",
+  });
+  if (!requester) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const requesterRole = requester.role_id?.role;
+  if (!["admin", "manager"].includes(requesterRole) && String(req.userId) !== String(user_id)) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+
   const user = await User.findById(user_id);
   if (!user) {
     return res.status(404).json({ message: "User not found" });

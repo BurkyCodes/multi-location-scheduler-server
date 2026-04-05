@@ -88,9 +88,11 @@ Role emails:
 - Alternative candidate suggestions for coverage
 - Swap/drop/pickup flow with peer acceptance + manager approval
 - Atomic swap acceptance and manager decision locking reduce concurrent acceptance/approval races
+- Direct pickup request creation flow is supported (`type: pickup` against active drop requests)
 - Pending swap cancellation by requester
 - Pending swap/drop cap enforced: max 3 pending swap/drop requests per requester
 - Drop requests auto-expire at shift start minus 24 hours (unclaimed drops)
+- Pending swap/drop requests tied to a shift are auto-cancelled when that shift is edited
 - Assignment concurrency lock for same user (reduces simultaneous assignment races)
 - Fairness analytics:
   - Hours distribution by staff
@@ -104,14 +106,12 @@ Role emails:
 - Automatic audit logging for create/update/delete mutations in supported scheduling entities:
   - schedules, shifts, shift assignments, swap requests, availabilities, notification preferences
 - Additional workflow audit logging for publish/unpublish, swap accept/decision/cancel, and assignment clock actions
+- Legacy endpoint hardening added for notifications, availabilities, preferences, skills, certifications, clock events, user roles, and user mutation routes
 
 ### Partially Implemented 
 - Real-time update transport (WebSocket/SSE) is not implemented yet
-- Swap/drop limits and expiry rules are incomplete:
-  - `pickup` request creation endpoint flow is still constrained; pickup is represented through accepting drops/swaps
-- Pending swap auto-cancel when shift is edited is not implemented
 - Audit coverage is broad for scheduling domain entities, but legacy/non-scheduling modules may still need additional audit hooks
-- Endpoint auth/authorization hardening improved significantly; continue tightening fine-grained ownership checks per endpoint as needed
+- Endpoint auth/authorization hardening is applied for major routes, with continuing scope for incremental endpoint-level tightening
 
 ## Evaluation Scenario Mapping
 1. Sunday Night Chaos
@@ -152,7 +152,7 @@ Role emails:
 
 4. Shift edited after swap approval
 - Approved swap remains valid unless manager manually reassigns/cancels.
-- Pending swap auto-cancel on shift edit is still pending implementation.
+- Pending swap requests are auto-cancelled when related shift details are edited.
 
 5. Location near timezone boundary
 - Each location uses a single canonical timezone; all shifts at that location inherit it.
