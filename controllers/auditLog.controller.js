@@ -7,7 +7,25 @@ export const createAuditLog = asyncHandler(async (req, res) => {
     actor_user_id: req.userId,
   };
   const auditLog = await AuditLog.create(payload);
-  res.status(201).json({ success: true, data: auditLog });
+  const populated = await AuditLog.findById(auditLog._id).populate(
+    "actor_user_id location_id",
+    "name email phone_number"
+  );
+  const data = populated?.toObject ? populated.toObject() : populated;
+  res.status(201).json({
+    success: true,
+    data: {
+      ...data,
+      performed_by: data?.actor_user_id
+        ? {
+            id: data.actor_user_id?._id || data.actor_user_id,
+            name: data.actor_user_id?.name || null,
+            email: data.actor_user_id?.email || null,
+            phone_number: data.actor_user_id?.phone_number || null,
+          }
+        : null,
+    },
+  });
 });
 
 export const getAuditLogs = asyncHandler(async (req, res) => {
@@ -29,8 +47,24 @@ export const getAuditLogs = asyncHandler(async (req, res) => {
   }
 
   const logs = await AuditLog.find(filter)
-    .populate("actor_user_id location_id")
+    .populate("actor_user_id", "name email phone_number")
+    .populate("location_id")
     .sort({ createdAt: -1 });
 
-  res.json({ success: true, count: logs.length, data: logs });
+  const data = logs.map((item) => {
+    const log = item.toObject ? item.toObject() : item;
+    return {
+      ...log,
+      performed_by: log?.actor_user_id
+        ? {
+            id: log.actor_user_id?._id || log.actor_user_id,
+            name: log.actor_user_id?.name || null,
+            email: log.actor_user_id?.email || null,
+            phone_number: log.actor_user_id?.phone_number || null,
+          }
+        : null,
+    };
+  });
+
+  res.json({ success: true, count: data.length, data });
 });
