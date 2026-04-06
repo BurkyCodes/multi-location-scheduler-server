@@ -8,6 +8,7 @@ import StaffPreference from "../models/StaffPreference.js";
 import Availability from "../models/Availability.js";
 import ClockEvent from "../models/ClockEvent.js";
 import SwapRequest from "../models/SwapRequest.js";
+import LaborAlert from "../models/LaborAlert.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { sendUserNotification } from "../services/notificationEvents.service.js";
 import { logAuditChange } from "../services/auditLog.service.js";
@@ -101,6 +102,14 @@ const weekdayLabel = (weekday) => {
   return names[weekday] || String(weekday);
 };
 
+const normalizeWeekday = (value) => {
+  const parsed = Number(value);
+  if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 6) {
+    return parsed;
+  }
+  return null;
+};
+
 const previousWeekday = (weekday) => (weekday + 6) % 7;
 
 const overlapByMinutes = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
@@ -109,7 +118,7 @@ const containsByMinutes = (outerStart, outerEnd, innerStart, innerEnd) =>
   outerStart <= innerStart && outerEnd >= innerEnd;
 
 const matchesEntryLocation = (entry, locationId) =>
-  !entry.location_id || entry.location_id.toString() === locationId.toString();
+  !entry.location_id || (locationId && entry.location_id.toString() === locationId.toString());
 
 const matchesNormalizedTimezone = (entry, timezone) =>
   normalizeTimezone(entry?.timezone) === normalizeTimezone(timezone);
@@ -181,6 +190,8 @@ const hasRecurringCoverage = (
   timezone
 ) => {
   return recurringWindows.some((window) => {
+    const windowWeekday = normalizeWeekday(window.weekday);
+    if (windowWeekday === null) return false;
     if (!matchesEntryLocation(window, locationId) || !matchesNormalizedTimezone(window, timezone)) {
       return false;
     }
@@ -192,18 +203,18 @@ const hasRecurringCoverage = (
     }
 
     // Same-day availability window.
-    if (window.weekday === weekday && windowEnd > windowStart) {
+    if (windowWeekday === weekday && windowEnd > windowStart) {
       return containsByMinutes(windowStart, windowEnd, segStart, segEnd);
     }
 
     // Overnight recurring window, e.g. 22:00-06:00.
     if (windowEnd <= windowStart) {
       // Coverage on the window's own day: start -> 24:00.
-      if (window.weekday === weekday) {
+      if (windowWeekday === weekday) {
         return containsByMinutes(windowStart, 1440, segStart, segEnd);
       }
       // Carry-over coverage on next day: 00:00 -> end.
-      if (window.weekday === previousWeekday(weekday)) {
+      if (windowWeekday === previousWeekday(weekday)) {
         return containsByMinutes(0, windowEnd, segStart, segEnd);
       }
     }
@@ -238,6 +249,8 @@ const getRecurringCoverageIntervals = (
 ) => {
   const intervals = [];
   recurringWindows.forEach((window) => {
+    const windowWeekday = normalizeWeekday(window.weekday);
+    if (windowWeekday === null) return;
     if (!matchesEntryLocation(window, locationId) || !matchesNormalizedTimezone(window, timezone)) {
       return;
     }
@@ -247,7 +260,7 @@ const getRecurringCoverageIntervals = (
     if (windowStart === null || windowEnd === null) return;
 
     // Same-day window.
-    if (window.weekday === weekday && windowEnd > windowStart) {
+    if (windowWeekday === weekday && windowEnd > windowStart) {
       const start = Math.max(segStart, windowStart);
       const end = Math.min(segEnd, windowEnd);
       if (end > start) intervals.push({ start, end });
@@ -256,7 +269,7 @@ const getRecurringCoverageIntervals = (
 
     if (windowEnd <= windowStart) {
       // Overnight recurring window contributes current-day coverage from start -> 24:00.
-      if (window.weekday === weekday) {
+      if (windowWeekday === weekday) {
         const start = Math.max(segStart, windowStart);
         const end = Math.min(segEnd, 1440);
         if (end > start) intervals.push({ start, end });
@@ -264,7 +277,7 @@ const getRecurringCoverageIntervals = (
       }
 
       // Carry-over segment from previous weekday overnight window: 00:00 -> end.
-      if (window.weekday === previousWeekday(weekday)) {
+      if (windowWeekday === previousWeekday(weekday)) {
         const start = Math.max(segStart, 0);
         const end = Math.min(segEnd, windowEnd);
         if (end > start) intervals.push({ start, end });
@@ -302,6 +315,197 @@ const formatUncoveredSegments = (weekday, date, uncovered) =>
     (gap) => `${weekdayLabel(weekday)} ${date} ${minutesToLabel(gap.start)}-${minutesToLabel(gap.end)}`
   );
 
+const summarizeDayCoverageWindows = (
+  recurringWindows,
+  weekday,
+  locationId,
+  timezone,
+  dateLabel = ""
+) => {
+  const segments = [];
+  recurringWindows.forEach((window) => {
+    const windowWeekday = normalizeWeekday(window.weekday);
+    if (windowWeekday === null) return;
+    if (!matchesEntryLocation(window, locationId) || !matchesNormalizedTimezone(window, timezone)) {
+      return;
+    }
+    const start = toMinutes(window.start_time_local);
+    const end = toMinutes(window.end_time_local);
+    if (start === null || end === null) return;
+
+    if (windowWeekday === weekday && end > start) {
+      segments.push(`${minutesToLabel(start)}-${minutesToLabel(end)}`);
+      return;
+    }
+    if (end <= start) {
+      if (windowWeekday === weekday) {
+        segments.push(`${minutesToLabel(start)}-24:00`);
+      } else if (windowWeekday === previousWeekday(weekday)) {
+        segments.push(`00:00-${minutesToLabel(end)}`);
+      }
+    }
+  });
+
+  const merged = mergeIntervals(
+    segments
+      .map((item) => {
+        const [startText, endText] = item.split("-");
+        const start = startText === "24:00" ? 1440 : toMinutes(startText);
+        const end = endText === "24:00" ? 1440 : toMinutes(endText);
+        if (start === null || end === null || end <= start) return null;
+        return { start, end };
+      })
+      .filter(Boolean)
+  );
+
+  if (!merged.length) {
+    return (
+      `No recurring window fully covers ${weekdayLabel(weekday)}${dateLabel ? ` (${dateLabel})` : ""} ` +
+      "after timezone conversion."
+    );
+  }
+  const windowText = merged
+    .map((entry) => `${minutesToLabel(entry.start)}-${minutesToLabel(entry.end)}`)
+    .join(", ");
+  return `Recurring windows on ${weekdayLabel(weekday)}${dateLabel ? ` (${dateLabel})` : ""}: ${windowText}.`;
+};
+const formatShiftWindowFriendly = (start, end, timezone) =>
+  `${start.date} ${start.time} - ${end.date} ${end.time} (${timezone})`;
+const addDaysToDateLabel = (dateLabel, days) => {
+  const base = new Date(`${dateLabel}T00:00:00.000Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+};
+const localDateTimeToUtcMs = (dateLabel, timeLabel, timezone) => {
+  const [year, month, day] = String(dateLabel || "").split("-").map(Number);
+  const [hour, minute] = String(timeLabel || "").split(":").map(Number);
+  if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) return NaN;
+
+  const tz = normalizeTimezone(timezone);
+  let guess = Date.UTC(year, month - 1, day, hour, minute);
+  for (let i = 0; i < 4; i += 1) {
+    const actual = getLocalParts(new Date(guess), tz);
+    const [actualYear, actualMonth, actualDay] = String(actual?.date || "")
+      .split("-")
+      .map(Number);
+    const [actualHour, actualMinute] = String(actual?.time || "")
+      .split(":")
+      .map(Number);
+    if (
+      !actualYear ||
+      !actualMonth ||
+      !actualDay ||
+      Number.isNaN(actualHour) ||
+      Number.isNaN(actualMinute)
+    ) {
+      break;
+    }
+    const desiredUtc = Date.UTC(year, month - 1, day, hour, minute);
+    const actualUtc = Date.UTC(actualYear, actualMonth - 1, actualDay, actualHour, actualMinute);
+    const diff = desiredUtc - actualUtc;
+    if (diff === 0) break;
+    guess += diff;
+  }
+  return guess;
+};
+const toUtcSegmentBounds = ({ date, start, end }, shiftTimezone) => {
+  const startMinute = Number(start);
+  const endMinute = Number(end);
+  const startTime = minutesToLabel(startMinute);
+  const endDate = endMinute > 1440 ? addDaysToDateLabel(date, 1) : date;
+  const boundedEnd = endMinute > 1440 ? endMinute - 1440 : endMinute;
+  const endTime = minutesToLabel(boundedEnd);
+  return {
+    startUtc: localDateTimeToUtcMs(date, startTime, shiftTimezone),
+    endUtc: localDateTimeToUtcMs(endDate, endTime, shiftTimezone),
+  };
+};
+const overlapsUtcBounds = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
+const containsUtcBounds = (outerStart, outerEnd, innerStart, innerEnd) =>
+  outerStart <= innerStart && outerEnd >= innerEnd;
+const buildExceptionUtcBounds = (entry) => {
+  const entryTimezone = normalizeTimezone(entry?.timezone);
+  const date = String(entry?.date || "");
+  if (!date) return null;
+
+  if (!entry?.start_time_local || !entry?.end_time_local) {
+    const startUtc = localDateTimeToUtcMs(date, "00:00", entryTimezone);
+    const endUtc = localDateTimeToUtcMs(addDaysToDateLabel(date, 1), "00:00", entryTimezone);
+    return { startUtc, endUtc };
+  }
+
+  const startMinutes = toMinutes(entry.start_time_local);
+  const endMinutes = toMinutes(entry.end_time_local);
+  if (startMinutes === null || endMinutes === null) return null;
+
+  const isOvernight = endMinutes <= startMinutes;
+  const startUtc = localDateTimeToUtcMs(date, minutesToLabel(startMinutes), entryTimezone);
+  const endDate = isOvernight ? addDaysToDateLabel(date, 1) : date;
+  const endUtc = localDateTimeToUtcMs(endDate, minutesToLabel(endMinutes), entryTimezone);
+  return { startUtc, endUtc };
+};
+const buildRecurringOccurrenceUtcBounds = (window, anchorUtcMs) => {
+  const timezone = normalizeTimezone(window?.timezone);
+  const startMinutes = toMinutes(window?.start_time_local);
+  const endMinutes = toMinutes(window?.end_time_local);
+  if (startMinutes === null || endMinutes === null) return [];
+
+  const isOvernight = endMinutes <= startMinutes;
+  const occurrences = [];
+
+  for (let offset = -2; offset <= 2; offset += 1) {
+    const probe = new Date(anchorUtcMs + offset * 24 * 60 * 60 * 1000);
+    const probeLocal = getLocalParts(probe, timezone);
+    if (probeLocal.weekday !== window.weekday) continue;
+
+    const localDate = probeLocal.date;
+    const startUtc = localDateTimeToUtcMs(localDate, minutesToLabel(startMinutes), timezone);
+    const endDate = isOvernight ? addDaysToDateLabel(localDate, 1) : localDate;
+    const endUtc = localDateTimeToUtcMs(endDate, minutesToLabel(endMinutes), timezone);
+    occurrences.push({ startUtc, endUtc });
+  }
+
+  return occurrences;
+};
+const hasUnavailableExceptionConverted = (exceptions, segment, locationId, shiftTimezone) => {
+  const { startUtc, endUtc } = toUtcSegmentBounds(segment, shiftTimezone);
+  return exceptions.some((entry) => {
+    if (
+      entry?.is_available !== false ||
+      !matchesEntryLocation(entry, locationId)
+    ) {
+      return false;
+    }
+    const bounds = buildExceptionUtcBounds(entry);
+    if (!bounds) return false;
+    return overlapsUtcBounds(startUtc, endUtc, bounds.startUtc, bounds.endUtc);
+  });
+};
+const hasAvailableExceptionConverted = (exceptions, segment, locationId, shiftTimezone) => {
+  const { startUtc, endUtc } = toUtcSegmentBounds(segment, shiftTimezone);
+  return exceptions.some((entry) => {
+    if (
+      entry?.is_available !== true ||
+      !matchesEntryLocation(entry, locationId)
+    ) {
+      return false;
+    }
+    const bounds = buildExceptionUtcBounds(entry);
+    if (!bounds) return false;
+    return containsUtcBounds(bounds.startUtc, bounds.endUtc, startUtc, endUtc);
+  });
+};
+const hasRecurringCoverageConverted = (recurringWindows, segment, locationId, shiftTimezone) => {
+  const { startUtc, endUtc } = toUtcSegmentBounds(segment, shiftTimezone);
+  return recurringWindows.some((window) => {
+    if (!matchesEntryLocation(window, locationId)) return false;
+    const occurrences = buildRecurringOccurrenceUtcBounds(window, startUtc);
+    return occurrences.some((occurrence) =>
+      containsUtcBounds(occurrence.startUtc, occurrence.endUtc, startUtc, endUtc)
+    );
+  });
+};
+
 const evaluateAvailability = (availability, shift) => {
   const shiftTimezone = normalizeTimezone(shift.location_timezone);
   const start = getLocalParts(shift.starts_at_utc, shiftTimezone);
@@ -311,7 +515,9 @@ const evaluateAvailability = (availability, shift) => {
   if (!availability) {
     return {
       rule: "availability_hours",
-      message: `Staff has no availability profile configured for shift ${localShiftLabel}`,
+      message:
+        `This staff member has no saved availability for this shift window (${localShiftLabel}). ` +
+        "Please update availability or select another staff member.",
     };
   }
   const shiftStartMinutes = toMinutes(start.time);
@@ -319,12 +525,78 @@ const evaluateAvailability = (availability, shift) => {
   if (shiftStartMinutes === null || shiftEndMinutes === null) {
     return {
       rule: "availability_hours",
-      message: `Could not interpret local shift time for availability validation: ${localShiftLabel}`,
+      message:
+        `We could not validate availability for this shift window (${localShiftLabel}). ` +
+        "Please review shift start/end times and timezone.",
     };
   }
 
   const exceptions = availability.exceptions || [];
   const recurring = availability.recurring_windows || [];
+  const availabilityTimezones = [
+    ...recurring.map((entry) => normalizeTimezone(entry?.timezone)),
+    ...exceptions.map((entry) => normalizeTimezone(entry?.timezone)),
+  ].filter(Boolean);
+  const timezonesMatchShift = availabilityTimezones.every((tz) => tz === shiftTimezone);
+  const useConvertedTimezoneChecks = !timezonesMatchShift;
+
+  if (useConvertedTimezoneChecks) {
+    const segments =
+      start.date === end.date
+        ? [{ date: start.date, weekday: start.weekday, start: shiftStartMinutes, end: shiftEndMinutes }]
+        : [
+            { date: start.date, weekday: start.weekday, start: shiftStartMinutes, end: 1440 },
+            { date: end.date, weekday: end.weekday, start: 0, end: shiftEndMinutes },
+          ].filter((segment) => segment.end > segment.start);
+
+    const hasUnavailable = segments.some((segment) =>
+      hasUnavailableExceptionConverted(exceptions, segment, shift.location_id, shiftTimezone)
+    );
+    if (hasUnavailable) {
+      return {
+        rule: "availability_hours",
+        message:
+          `This staff member is marked unavailable for the shift window ` +
+          `(${formatShiftWindowFriendly(start, end, shiftTimezone)}).`,
+      };
+    }
+
+    const coveredByAvailableExceptions = segments.every((segment) =>
+      hasAvailableExceptionConverted(exceptions, segment, shift.location_id, shiftTimezone)
+    );
+    if (coveredByAvailableExceptions) return null;
+
+    const uncoveredSegments = segments.filter(
+      (segment) =>
+        !hasRecurringCoverageConverted(recurring, segment, shift.location_id, shiftTimezone)
+    );
+    if (uncoveredSegments.length) {
+      const uncoveredText = uncoveredSegments
+        .map(
+          (segment) =>
+            `${weekdayLabel(segment.weekday)} ${segment.date} ${minutesToLabel(segment.start)}-${minutesToLabel(
+              segment.end
+            )}`
+        )
+        .join("; ");
+      return {
+        rule: "availability_hours",
+        message:
+          `This shift is outside the staff member's recurring availability ` +
+          `(${formatShiftWindowFriendly(start, end, shiftTimezone)}). ` +
+          `Uncovered time: ${uncoveredText}. ` +
+          summarizeDayCoverageWindows(
+            recurring,
+            start.weekday,
+            shift.location_id,
+            shiftTimezone,
+            start.date
+          ),
+      };
+    }
+
+    return null;
+  }
 
   if (start.date === end.date) {
     if (
@@ -339,7 +611,9 @@ const evaluateAvailability = (availability, shift) => {
     ) {
       return {
         rule: "availability_hours",
-        message: `Shift ${localShiftLabel} violates availability exception: marked unavailable for ${start.date} ${start.time}-${end.time}`,
+        message:
+          `This staff member is marked unavailable for the shift window ` +
+          `(${formatShiftWindowFriendly(start, end, shiftTimezone)}).`,
       };
     }
 
@@ -382,11 +656,17 @@ const evaluateAvailability = (availability, shift) => {
 
       return {
         rule: "availability_hours",
-        message: `Shift ${localShiftLabel} is outside recurring availability coverage for gap(s): ${formatUncoveredSegments(
-          start.weekday,
-          start.date,
-          uncovered
-        ).join("; ")}`,
+        message:
+          `This shift is outside the staff member's recurring availability ` +
+          `(${formatShiftWindowFriendly(start, end, shiftTimezone)}). ` +
+          `Uncovered time: ${formatUncoveredSegments(start.weekday, start.date, uncovered).join("; ")}. ` +
+          summarizeDayCoverageWindows(
+            recurring,
+            start.weekday,
+            shift.location_id,
+            shiftTimezone,
+            start.date
+          ),
       };
     }
 
@@ -419,7 +699,9 @@ const evaluateAvailability = (availability, shift) => {
   ) {
     return {
       rule: "availability_hours",
-      message: `Shift ${localShiftLabel} crosses unavailable exception coverage (${start.date} ${start.time}-24:00 or ${end.date} 00:00-${end.time})`,
+      message:
+        `This overnight shift overlaps an unavailable exception ` +
+        `(${formatShiftWindowFriendly(start, end, shiftTimezone)}).`,
     };
   }
 
@@ -501,9 +783,23 @@ const evaluateAvailability = (availability, shift) => {
 
     return {
       rule: "availability_hours",
-      message: `Shift ${localShiftLabel} is outside recurring availability coverage for segment(s): ${missingSegments.join(
-        "; "
-      )}`,
+      message:
+        `This overnight shift is outside the staff member's recurring availability ` +
+        `(${formatShiftWindowFriendly(start, end, shiftTimezone)}). ` +
+        `Uncovered time: ${missingSegments.join("; ")}. ` +
+        `${summarizeDayCoverageWindows(
+          recurring,
+          start.weekday,
+          shift.location_id,
+          shiftTimezone,
+          start.date
+        )} ${summarizeDayCoverageWindows(
+          recurring,
+          end.weekday,
+          shift.location_id,
+          shiftTimezone,
+          end.date
+        )}`,
     };
   }
 
@@ -637,6 +933,8 @@ const buildLaborCompliance = ({
   });
 
   const projectedWeeklyHours = weeklyHoursInBucket + computeDurationHours(shift.starts_at_utc, shift.ends_at_utc);
+  const longestStreak = getLongestConsecutiveStreak(workedDayLabels);
+  const enforceDailyBlock = longestStreak >= 6;
 
   if (projectedWeeklyHours >= WEEKLY_WARNING_HOURS) {
     const warning = {
@@ -674,19 +972,21 @@ const buildLaborCompliance = ({
   dayMinutesMap.forEach((minutes, dateLabel) => {
     const hours = minutes / 60;
     if (hours > DAILY_BLOCK_HOURS) {
-      const message = `Projected daily hours on ${dateLabel} would be ${hours.toFixed(
-        1
-      )}h, above hard block ${DAILY_BLOCK_HOURS}h`;
-      violations.push({
-        rule: "daily_12_block",
-        message,
-      });
-      alerts.push({
-        type: "daily_12_block",
-        severity: "block",
-        message,
-        metadata: { date: dateLabel, projected_hours: Number(hours.toFixed(2)) },
-      });
+      if (enforceDailyBlock) {
+        const message = `Projected daily hours on ${dateLabel} would be ${hours.toFixed(
+          1
+        )}h, above ${DAILY_BLOCK_HOURS}h`;
+        violations.push({
+          rule: "daily_12_block",
+          message,
+        });
+        alerts.push({
+          type: "daily_12_block",
+          severity: "block",
+          message,
+          metadata: { date: dateLabel, projected_hours: Number(hours.toFixed(2)) },
+        });
+      }
       return;
     }
     if (hours > DAILY_WARNING_HOURS) {
@@ -706,7 +1006,6 @@ const buildLaborCompliance = ({
     }
   });
 
-  const longestStreak = getLongestConsecutiveStreak(workedDayLabels);
   if (longestStreak >= 6) {
     const warningMessage = `Projected consecutive-workday streak is ${longestStreak} day(s); day 6 warning threshold reached`;
     warnings.push({

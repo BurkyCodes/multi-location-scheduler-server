@@ -26,7 +26,10 @@ npm install
 ```env
 MONGO_URI=<your_mongodb_connection_string>
 LOGIN_SECRET=<your_jwt_secret>
+PORT=<optional, default 5000>
+NODE_ENV=<optional, development|production>
 FIREBASE_SERVICE_ACCOUNT_PATH=<optional path to Firebase service account JSON>
+FIREBASE_SERVICE_ACCOUNT_JSON=<optional inline service account JSON>
 SMTP=<smtp app password>
 SMTP_USER=<smtp username/email address>
 SMTP_HOST=<optional, defaults to smtp.gmail.com>
@@ -83,9 +86,9 @@ Role emails:
   - Active certification for location
   - Availability window check (including overnight shifts)
   - Weekly max-hours cap using staff preference (default 40)
-  - Labor compliance automation:
+- Labor compliance automation:
     - Daily >8h warning
-    - Daily >12h hard block
+    - Daily >12h block (enforced after projected 6-day streak is reached)
     - 6th consecutive day warning
     - 7th consecutive day requires manager override with documented reason
 - Existing assignees are re-validated before shift updates are applied
@@ -147,7 +150,7 @@ Role emails:
 - Manager can inspect analytics via `GET /api/assignments/insights` and fairness endpoints.
 
 3. Timezone Tangle
-- Availability is evaluated in shift location timezone.
+- Availability is evaluated against shift location timezone, including conversion when availability and shift timezones differ.
 - Cross-timezone certifications are supported, but timezone vocabulary is currently restricted to configured canonical zones.
 
 4. Simultaneous Assignment
@@ -180,6 +183,27 @@ Role emails:
 
 5. Location near timezone boundary
 - Each location uses a single canonical timezone; all shifts at that location inherit it.
+
+## Environment Requirements Summary
+
+Required to start server:
+- `MONGO_URI`
+- `LOGIN_SECRET`
+
+Optional but recommended:
+- `PORT`
+- `NODE_ENV`
+- SMTP variables for email notifications (`SMTP`, `SMTP_USER`, optional SMTP host/port/secure/from)
+- Firebase service account (`FIREBASE_SERVICE_ACCOUNT_PATH` or `FIREBASE_SERVICE_ACCOUNT_JSON`) for push delivery
+
+## Edge-Case Status
+
+All currently tracked assignment edge cases in this project are handled in the active ruleset, including:
+- Cross-timezone availability validation and mismatch diagnostics
+- Overnight and split-day shift coverage checks
+- Consecutive-day compliance warnings/overrides
+- Daily/weekly labor projection warnings and blocks
+- Assignment conflict locking and swap approval race protection
 
 ## Additional Edge Cases To Cover (Beyond Prompt)
 1. Shift exactly touching boundaries (e.g., end at 14:00, next starts 14:00) should not be marked overlapping.

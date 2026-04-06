@@ -16,7 +16,41 @@ export const updateSkill = skillController.updateById;
 export const deleteSkill = skillController.deleteById;
 
 export const createStaffSkill = asyncHandler(async (req, res) => {
-  const staffSkill = await StaffSkill.create(req.body);
+  const { user_id, skill_id } = req.body;
+
+  if (!user_id || !skill_id) {
+    return res.status(400).json({
+      success: false,
+      message: "user_id and skill_id are required",
+    });
+  }
+
+  const existing = await StaffSkill.findOne({ user_id, skill_id }).populate(
+    "user_id skill_id verified_by"
+  );
+
+  if (existing?.is_active) {
+    const staffName =
+      existing.user_id?.name || existing.user_id?.email || "This staff member";
+    const skillName =
+      existing.skill_id?.name || existing.skill_id?.code || "selected skill";
+    return res.status(409).json({
+      success: false,
+      message: `${staffName} already has ${skillName} assigned.`,
+    });
+  }
+
+  const staffSkill = existing
+    ? await StaffSkill.findByIdAndUpdate(
+        existing._id,
+        {
+          ...req.body,
+          is_active: true,
+        },
+        { new: true, runValidators: true }
+      )
+    : await StaffSkill.create(req.body);
+
   const populated = await StaffSkill.findById(staffSkill._id).populate(
     "user_id skill_id verified_by"
   );
@@ -33,7 +67,11 @@ export const createStaffSkill = asyncHandler(async (req, res) => {
     },
   });
 
-  return res.status(201).json({ success: true, data: populated });
+  return res.status(existing ? 200 : 201).json({
+    success: true,
+    message: existing ? "Existing staff skill was re-activated." : undefined,
+    data: populated,
+  });
 });
 export const getStaffSkills = staffSkillController.getAll;
 export const getStaffSkillById = staffSkillController.getById;

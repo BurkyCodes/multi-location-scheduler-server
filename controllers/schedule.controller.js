@@ -122,10 +122,14 @@ export const getSchedules = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "User not found" });
   }
 
-  const isManager = currentUser.role_id?.role === "manager";
+  const role = currentUser.role_id?.role;
+  const isManager = role === "manager";
+  const isAdmin = role === "admin";
   const filter = isManager
     ? { location_id: { $in: currentUser.location_ids || [] } }
-    : { status: "published" };
+    : isAdmin
+      ? {}
+      : { status: "published" };
 
   const schedules = await Schedule.find(filter)
     .populate("location_id published_by")
@@ -151,14 +155,15 @@ export const getScheduleById = asyncHandler(async (req, res) => {
     return res.status(404).json({ success: false, message: "Schedule not found" });
   }
 
-  if (currentUser.role_id?.role !== "manager" && schedule.status !== "published") {
+  const role = currentUser.role_id?.role;
+  const isManager = role === "manager";
+  const isAdmin = role === "admin";
+
+  if (!isManager && !isAdmin && schedule.status !== "published") {
     return res.status(404).json({ success: false, message: "Schedule not found" });
   }
 
-  if (
-    currentUser.role_id?.role === "manager" &&
-    !hasLocationAccess(currentUser, schedule.location_id)
-  ) {
+  if (isManager && !hasLocationAccess(currentUser, schedule.location_id)) {
     return res.status(403).json({
       success: false,
       message: "Managers can only access schedules for assigned locations",
