@@ -8,6 +8,7 @@ const ENTITY_TYPE_BY_COLLECTION = Object.freeze({
   swap_requests: "swap_request",
   availabilities: "availability",
   notification_preferences: "notification_preference",
+  staff_location_certifications: "certification",
 });
 
 const toId = (value) => {

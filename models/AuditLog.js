@@ -22,6 +22,7 @@ const auditLogSchema = new Schema(
         "swap_request",
         "availability",
         "notification_preference",
+        "certification",
       ],
       required: [true, "Entity type is required"],
     },

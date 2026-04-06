@@ -6,6 +6,7 @@ import {
   deleteAssignment,
   getAssignmentOperationalInsights,
   getCoverageSuggestions,
+  getOnDutyNow,
   getAssignmentById,
   getAssignments,
   getMyShiftTracking,
@@ -22,6 +23,7 @@ const router = Router();
 
 router.get("/", checkAuthentication, getAssignments);
 router.get("/my/tracking", checkAuthentication, getMyShiftTracking);
+router.get("/on-duty-now", checkAuthentication, getOnDutyNow);
 router.get("/insights", checkAuthentication, getAssignmentOperationalInsights);
 router.get("/worked-hours", checkAuthentication, getWorkedHoursAnalytics);
 router.get("/coverage/:shift_id", checkAuthentication, requireManager, getCoverageSuggestions);

@@ -26,6 +26,20 @@ const staffLocationCertificationSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    decertified_at: {
+      type: Date,
+      default: null,
+    },
+    decertified_by: {
+      type: Schema.Types.ObjectId,
+      ref: "users",
+      default: null,
+    },
+    decertified_reason: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: true,

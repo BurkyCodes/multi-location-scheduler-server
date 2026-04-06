@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createCertification,
+  decertifyCertification,
   deleteCertification,
   getCertificationById,
   getCertifications,
@@ -15,6 +16,7 @@ router.post("/", checkAuthentication, requireManagerOrAdmin, createCertification
 router.get("/", checkAuthentication, getCertifications);
 router.get("/:id", checkAuthentication, getCertificationById);
 router.patch("/:id", checkAuthentication, requireManagerOrAdmin, updateCertification);
+router.patch("/:id/decertify", checkAuthentication, requireManagerOrAdmin, decertifyCertification);
 router.delete("/:id", checkAuthentication, requireManagerOrAdmin, deleteCertification);
 
 export default router;

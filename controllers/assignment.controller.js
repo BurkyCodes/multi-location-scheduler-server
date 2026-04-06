@@ -988,6 +988,23 @@ const toIdString = (value) => {
 };
 
 const getRole = (user) => user?.role_id?.role || null;
+const notifyAssignmentConflict = async ({ managerUserId, shiftId, targetUserId }) => {
+  await sendUserNotification({
+    user_id: managerUserId,
+    title: "Assignment conflict detected",
+    message:
+      "Another manager is assigning this staff member right now. Please retry in a moment.",
+    category: "assignment_conflict",
+    priority: "normal",
+    data: {
+      shift_id: String(shiftId || ""),
+      user_id: String(targetUserId || ""),
+    },
+    idempotency_key: `assignment_conflict:${String(shiftId || "")}:${String(
+      targetUserId || ""
+    )}:${new Date().toISOString().slice(0, 16)}`,
+  });
+};
 
 const toClockState = (workStatus) => {
   if (workStatus === "clocked_in") return "clocked_in";
@@ -1212,15 +1229,28 @@ export const getWorkedHoursAnalytics = asyncHandler(async (req, res) => {
     return assignment.user_id._id.toString() === currentUser._id.toString();
   });
 
+  const userIds = [
+    ...new Set(visibleAssignments.map((assignment) => assignment.user_id?._id?.toString()).filter(Boolean)),
+  ];
+  const preferences = await StaffPreference.find({ user_id: { $in: userIds } }).select(
+    "user_id desired_hours_per_week max_hours_per_week"
+  );
+  const preferenceByUser = new Map(
+    preferences.map((item) => [item.user_id.toString(), item])
+  );
+
   const byUser = new Map();
 
   visibleAssignments.forEach((assignment) => {
     const user = assignment.user_id;
     const userKey = user._id.toString();
     if (!byUser.has(userKey)) {
+      const pref = preferenceByUser.get(userKey);
       byUser.set(userKey, {
         user_id: user._id,
         name: user.name || user.email || user.phone_number || "Unknown",
+        desired_hours_per_week: Number(pref?.desired_hours_per_week ?? DEFAULT_WEEKLY_HOURS_LIMIT),
+        max_hours_per_week: Number(pref?.max_hours_per_week ?? DEFAULT_WEEKLY_HOURS_LIMIT),
         total_worked_minutes: 0,
         buckets: {},
       });
@@ -1255,17 +1285,29 @@ export const getWorkedHoursAnalytics = asyncHandler(async (req, res) => {
   });
 
   const employees = Array.from(byUser.values())
-    .map((item) => ({
-      ...item,
-      total_worked_hours: Number((item.total_worked_minutes / 60).toFixed(2)),
-      buckets: Object.entries(item.buckets)
-        .sort(([a], [b]) => (a > b ? 1 : -1))
-        .map(([bucket, minutes]) => ({
-          bucket,
-          worked_minutes: minutes,
-          worked_hours: Number((minutes / 60).toFixed(2)),
-        })),
-    }))
+    .map((item) => {
+      const totalWorkedHours = Number((item.total_worked_minutes / 60).toFixed(2));
+      const desiredHours = Number(item.desired_hours_per_week ?? DEFAULT_WEEKLY_HOURS_LIMIT);
+      const maxHours = Number(item.max_hours_per_week ?? DEFAULT_WEEKLY_HOURS_LIMIT);
+      const isOverboardEmployee = totalWorkedHours > desiredHours;
+      const qualifiedForRaise = isOverboardEmployee;
+
+      return {
+        ...item,
+        total_worked_hours: totalWorkedHours,
+        is_overboard_employee: isOverboardEmployee,
+        qualified_for_raise: qualifiedForRaise,
+        desired_hours_gap: Number((totalWorkedHours - desiredHours).toFixed(2)),
+        exceeds_max_hours_limit: totalWorkedHours > maxHours,
+        buckets: Object.entries(item.buckets)
+          .sort(([a], [b]) => (a > b ? 1 : -1))
+          .map(([bucket, minutes]) => ({
+            bucket,
+            worked_minutes: minutes,
+            worked_hours: Number((minutes / 60).toFixed(2)),
+          })),
+      };
+    })
     .sort((a, b) => b.total_worked_minutes - a.total_worked_minutes);
 
   return res.json({
@@ -1274,6 +1316,8 @@ export const getWorkedHoursAnalytics = asyncHandler(async (req, res) => {
     from: fromDate,
     to: toDate,
     count: employees.length,
+    desired_hours_policy:
+      "Desired hours are a planning target and do not override availability windows. If worked_hours exceed desired_hours_per_week, employee is flagged as overboard and qualified_for_raise.",
     data: employees,
   });
 });
@@ -1562,10 +1606,21 @@ export const createAssignment = asyncHandler(async (req, res) => {
 
   const lockAcquired = await acquireUserAssignmentLock(assignedUser._id);
   if (!lockAcquired) {
+    await notifyAssignmentConflict({
+      managerUserId: req.userId,
+      shiftId: shift._id,
+      targetUserId: assignedUser._id,
+    });
     return res.status(409).json({
       success: false,
       message:
         "Another assignment operation is in progress for this staff member. Please retry.",
+      conflict: {
+        type: "assignment_lock",
+        shift_id: shift._id,
+        user_id: assignedUser._id,
+        retry_after_ms: ASSIGNMENT_LOCK_MS,
+      },
     });
   }
 
@@ -1803,6 +1858,103 @@ export const getMyShiftTracking = asyncHandler(async (req, res) => {
   });
 });
 
+export const getOnDutyNow = asyncHandler(async (req, res) => {
+  const currentUser = await getCurrentUser(req.userId);
+  if (!currentUser) {
+    return res.status(404).json({ success: false, message: "User not found" });
+  }
+
+  const role = getRole(currentUser);
+  if (!["admin", "manager"].includes(role)) {
+    return res.status(403).json({
+      success: false,
+      message: "Only admin or manager can access on-duty data",
+    });
+  }
+
+  const shiftMatch =
+    role === "manager"
+      ? { location_id: { $in: currentUser.location_ids || [] } }
+      : {};
+
+  const assignments = await ShiftAssignment.find({
+    status: "assigned",
+    work_status: { $in: ["clocked_in", "paused"] },
+  })
+    .populate({
+      path: "shift_id",
+      select: "location_id starts_at_utc ends_at_utc location_timezone",
+      match: shiftMatch,
+      populate: { path: "location_id", select: "name timezone" },
+    })
+    .populate({ path: "user_id", select: "name email phone_number" })
+    .sort({ updatedAt: -1 });
+
+  const now = new Date();
+  const grouped = new Map();
+
+  assignments.forEach((assignment) => {
+    if (!assignment.shift_id || !assignment.user_id) return;
+
+    const shiftStart = assignment.shift_id?.starts_at_utc
+      ? new Date(assignment.shift_id.starts_at_utc)
+      : null;
+    const shiftEnd = assignment.shift_id?.ends_at_utc
+      ? new Date(assignment.shift_id.ends_at_utc)
+      : null;
+    if (
+      !shiftStart ||
+      !shiftEnd ||
+      Number.isNaN(shiftStart.getTime()) ||
+      Number.isNaN(shiftEnd.getTime())
+    ) {
+      return;
+    }
+    if (now < shiftStart || now > shiftEnd) return;
+
+    const location = assignment.shift_id.location_id || {};
+    const locationId = toIdString(location) || "unknown";
+    if (!grouped.has(locationId)) {
+      grouped.set(locationId, {
+        location: {
+          id: locationId,
+          name: location?.name || "Unknown Location",
+          timezone: location?.timezone || assignment.shift_id.location_timezone || null,
+        },
+        on_duty_count: 0,
+        staff: [],
+      });
+    }
+
+    const target = grouped.get(locationId);
+    target.staff.push({
+      assignment_id: assignment._id,
+      user_id: assignment.user_id?._id || assignment.user_id,
+      name:
+        assignment.user_id?.name ||
+        assignment.user_id?.email ||
+        assignment.user_id?.phone_number ||
+        "Unknown",
+      work_status: assignment.work_status,
+      shift_id: assignment.shift_id?._id || assignment.shift_id,
+      shift_starts_at_utc: assignment.shift_id?.starts_at_utc || null,
+      shift_ends_at_utc: assignment.shift_id?.ends_at_utc || null,
+    });
+    target.on_duty_count += 1;
+  });
+
+  const locations = Array.from(grouped.values()).sort(
+    (a, b) => b.on_duty_count - a.on_duty_count
+  );
+
+  return res.json({
+    success: true,
+    now_utc: now,
+    total_on_duty: locations.reduce((sum, item) => sum + item.on_duty_count, 0),
+    locations,
+  });
+});
+
 export const updateAssignment = asyncHandler(async (req, res) => {
   const assignment = await ShiftAssignment.findById(req.params.id);
   if (!assignment) {
@@ -1854,10 +2006,21 @@ export const updateAssignment = asyncHandler(async (req, res) => {
 
   const lockAcquired = await acquireUserAssignmentLock(assignedUser._id);
   if (!lockAcquired) {
+    await notifyAssignmentConflict({
+      managerUserId: req.userId,
+      shiftId: shift._id,
+      targetUserId: assignedUser._id,
+    });
     return res.status(409).json({
       success: false,
       message:
         "Another assignment operation is in progress for this staff member. Please retry.",
+      conflict: {
+        type: "assignment_lock",
+        shift_id: shift._id,
+        user_id: assignedUser._id,
+        retry_after_ms: ASSIGNMENT_LOCK_MS,
+      },
     });
   }
 
