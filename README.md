@@ -165,21 +165,40 @@ Role emails:
 
 ## Assumptions For Intentional Ambiguities
 1. De-certifying staff from a location
+- Decision: de-certification is a forward-looking eligibility change, not a historical data rewrite.
 - Historical assignments remain intact for reporting/audit consistency.
 - Future assignment validation fails if certification is inactive.
+- API behavior: `PATCH /api/certifications/:id/decertify` sets `is_active=false` and stores decertification metadata (`decertified_at`, `decertified_by`, `decertified_reason`).
 
 2. Desired hours vs availability
-- Availability is a hard constraint.
-- Desired hours is a planning/fairness signal, not a hard assignment blocker.
+- Decision: availability windows are hard constraints; desired hours are planning targets.
+- Availability is always enforced before assignment.
+- Desired hours never permit assignment outside availability windows.
 
-3. Consecutive-day calculation
+3. Desired hours over-target outcome
+- Decision: when worked hours exceed `desired_hours_per_week`, the staff member is flagged as:
+  - `is_overboard_employee: true`
+  - `qualified_for_raise: true`
+- This is an analytics signal and does not auto-change role, pay, or assignment eligibility.
+
+4. On-duty now dashboard semantics
+- Decision: "on-duty now" includes assigned staff with `work_status` in `clocked_in` or `paused` and whose shift time window includes current time.
+- Visibility is manager/admin only and scoped by location access for managers.
+- Data is grouped by location and refreshed live via existing realtime assignment/clock events.
+
+5. Simultaneous assignment by two managers
+- Decision: per-user assignment lock is authoritative.
+- One request acquires the lock and proceeds; the competing request receives `409 conflict`.
+- The losing manager receives an immediate conflict notification and a retry hint payload.
+
+6. Consecutive-day calculation
 - Any worked time on a day counts as a worked day (1 hour and 11 hours both count as 1 day).
 
-4. Shift edited after swap approval
+7. Shift edited after swap approval
 - Approved swap remains valid unless manager manually reassigns/cancels.
 - Pending swap requests are auto-cancelled when related shift details are edited.
 
-5. Location near timezone boundary
+8. Location near timezone boundary
 - Each location uses a single canonical timezone; all shifts at that location inherit it.
 
 ## Environment Requirements Summary
@@ -202,4 +221,3 @@ All currently tracked assignment edge cases in this project are handled in the a
 - Consecutive-day compliance warnings/overrides
 - Daily/weekly labor projection warnings and blocks
 - Assignment conflict locking and swap approval race protection
-
