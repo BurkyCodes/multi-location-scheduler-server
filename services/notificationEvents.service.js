@@ -1,9 +1,11 @@
 import Notification from "../models/Notification.js";
 import DeviceToken from "../models/DeviceToken.js";
+import NotificationPreference from "../models/NotificationPreference.js";
 import User from "../models/User.js";
 import UserRole from "../models/UserRole.js";
 import admin, { isFirebaseReady } from "../config/firebase.js";
 import { publishRealtimeEventToUser } from "./realtimeEvents.service.js";
+import { sendNotificationEmail } from "./email.service.js";
 
 const toIdString = (value) => {
   if (!value) return "";
@@ -14,6 +16,15 @@ const toIdString = (value) => {
 
 const toSafeDataPayload = (data = {}) =>
   Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value ?? "")]));
+
+const DEFAULT_CHANNELS = { in_app: true, email: false };
+const resolveChannels = (preference) => {
+  const inApp = preference?.channels?.in_app;
+  const email = preference?.channels?.email;
+  const safeInApp = typeof inApp === "boolean" ? inApp : DEFAULT_CHANNELS.in_app;
+  const safeEmail = typeof email === "boolean" ? email : DEFAULT_CHANNELS.email;
+  return { in_app: safeInApp, email: safeEmail };
+};
 
 export const sendUserNotification = async ({
   user_id,
@@ -32,7 +43,13 @@ export const sendUserNotification = async ({
     return { status: "skipped", reason: "Missing user_id" };
   }
 
-  if (idempotency_key) {
+  const [user, preference] = await Promise.all([
+    User.findById(userId).select("email name"),
+    NotificationPreference.findOne({ user_id: userId }).select("channels"),
+  ]);
+  const channels = resolveChannels(preference);
+
+  if (idempotency_key && channels.in_app) {
     const existing = await Notification.findOne({
       user_id: userId,
       idempotency_key,
@@ -48,32 +65,54 @@ export const sendUserNotification = async ({
     }
   }
 
-  const notification = await Notification.create({
-    org_user_id: userId,
-    user_id,
-    title,
-    message,
-    type,
-    category,
-    priority,
-    link,
-    icon,
-    data,
-    idempotency_key,
-    delivery_status: "sent",
-    status: "unread",
-  });
-  publishRealtimeEventToUser(userId, "notification_created", {
-    notification_id: notification._id.toString(),
-    category: notification.category || category || "",
-    title: notification.title || title || "Notification",
-    message: notification.message || message || "",
-    createdAt: notification.createdAt,
-  });
-
   const result = {
-    in_app: { status: "sent", notification_id: notification._id },
+    channels,
   };
+
+  if (channels.in_app) {
+    const notification = await Notification.create({
+      org_user_id: userId,
+      user_id,
+      title,
+      message,
+      type,
+      category,
+      priority,
+      link,
+      icon,
+      data,
+      idempotency_key,
+      delivery_status: "sent",
+      status: "unread",
+    });
+    publishRealtimeEventToUser(userId, "notification_created", {
+      notification_id: notification._id.toString(),
+      category: notification.category || category || "",
+      title: notification.title || title || "Notification",
+      message: notification.message || message || "",
+      createdAt: notification.createdAt,
+    });
+    result.in_app = { status: "sent", notification_id: notification._id };
+  } else {
+    result.in_app = { status: "skipped", reason: "Disabled by preference" };
+  }
+
+  if (channels.email) {
+    result.email = await sendNotificationEmail({
+      to: user?.email,
+      title,
+      message,
+      link,
+      data: { ...data, idempotency_key },
+    });
+  } else {
+    result.email = { status: "skipped", reason: "Disabled by preference" };
+  }
+
+  if (!channels.in_app) {
+    result.push = { status: "skipped", reason: "Disabled by preference" };
+    return result;
+  }
 
   if (!isFirebaseReady()) {
     result.push = { status: "skipped", reason: "Firebase not configured" };

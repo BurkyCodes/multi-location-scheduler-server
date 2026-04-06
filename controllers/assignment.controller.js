@@ -995,6 +995,19 @@ const toClockState = (workStatus) => {
   if (workStatus === "clocked_out") return "clocked_out";
   return "not_started";
 };
+const deriveShiftStatus = (shift) => {
+  const persistedStatus = shift?.status || null;
+  if (!persistedStatus || persistedStatus === "cancelled") {
+    return persistedStatus;
+  }
+
+  const shiftEnd = shift?.ends_at_utc ? new Date(shift.ends_at_utc) : null;
+  if (!shiftEnd || Number.isNaN(shiftEnd.getTime())) {
+    return persistedStatus;
+  }
+
+  return Date.now() > shiftEnd.getTime() ? "ended" : persistedStatus;
+};
 
 const calculateTrackingMinutes = (assignment, now = new Date()) => {
   const sessions = assignment.work_sessions || [];
@@ -1074,7 +1087,8 @@ const toTrackingResponse = (assignment, now = new Date()) => {
           starts_at_utc: shift.starts_at_utc || null,
           ends_at_utc: shift.ends_at_utc || null,
           timezone: shift.location_timezone || null,
-          status: shift.status || null,
+          persisted_status: shift.status || null,
+          status: deriveShiftStatus(shift),
           location: shift.location_id
             ? {
                 id: toIdString(shift.location_id),

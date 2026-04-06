@@ -20,6 +20,11 @@ const notificationPreferenceSchema = new Schema(
         default: false,
       },
     },
+    delivery_mode: {
+      type: String,
+      enum: ["in_app_only", "in_app_plus_email", "email_only", "none"],
+      default: "in_app_only",
+    },
     events: {
       shift_assigned: { type: Boolean, default: true },
       shift_changed: { type: Boolean, default: true },

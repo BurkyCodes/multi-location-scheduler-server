@@ -59,11 +59,25 @@ const formatInTimezone = (dateValue, timezone) =>
     minute: "2-digit",
     hourCycle: "h23",
   }).format(new Date(dateValue));
+const deriveShiftStatus = (shiftData) => {
+  const persistedStatus = shiftData?.status || "open";
+  if (persistedStatus === "cancelled") return persistedStatus;
+
+  const endAt = shiftData?.ends_at_utc ? new Date(shiftData.ends_at_utc) : null;
+  if (!endAt || Number.isNaN(endAt.getTime())) {
+    return persistedStatus;
+  }
+
+  return Date.now() > endAt.getTime() ? "ended" : persistedStatus;
+};
 const toShiftResponse = (shift) => {
   const data = shift.toObject ? shift.toObject() : shift;
   const safeTimezone = normalizeTimezone(data.location_timezone);
+  const effectiveStatus = deriveShiftStatus(data);
   return {
     ...data,
+    persisted_status: data.status,
+    status: effectiveStatus,
     location_timezone: safeTimezone,
     location_timezone_label: toTimezoneLabel(safeTimezone),
     starts_at_local: formatInTimezone(data.starts_at_utc, safeTimezone),

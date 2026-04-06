@@ -27,6 +27,12 @@ npm install
 MONGO_URI=<your_mongodb_connection_string>
 LOGIN_SECRET=<your_jwt_secret>
 FIREBASE_SERVICE_ACCOUNT_PATH=<optional path to Firebase service account JSON>
+SMTP=<smtp app password>
+SMTP_USER=<smtp username/email address>
+SMTP_HOST=<optional, defaults to smtp.gmail.com>
+SMTP_PORT=<optional, defaults to 465>
+SMTP_SECURE=<optional, true/false>
+SMTP_FROM=<optional from email, defaults to SMTP_USER>
 ```
 3. Start server:
 ```bash
@@ -99,6 +105,8 @@ Role emails:
   - Premium shift distribution (Fri/Sat evening)
   - Fairness score + under/over scheduled lists
 - Notification persistence with read/unread flows
+- Notification channel preferences: `in_app_only`, `in_app_plus_email`, `email_only`, or `none`
+- SMTP email notifications when email channel is enabled
 - Notification idempotency key support to deduplicate retry-generated in-app notifications
 - Real-time SSE transport for live schedule/shift/assignment/swap/clock/notification updates
 - Clock-in/pause/resume/clock-out tracking

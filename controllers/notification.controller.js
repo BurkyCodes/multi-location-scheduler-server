@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import admin, { isFirebaseReady } from "../config/firebase.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { createCrudController } from "./crud.controller.js";
+import { sendNotificationEmail } from "../services/email.service.js";
 
 const notificationController = createCrudController(Notification, {
   populate: "user_id related_shift_id related_swap_request_id",
@@ -203,6 +204,22 @@ export const sendNotification = asyncHandler(async (req, res) => {
           total_devices: tokens.length,
         };
       }
+    }
+  }
+
+  if (channels.includes("email")) {
+    const recipientUserId = user_id || org_user_id;
+    if (!recipientUserId) {
+      results.email = { status: "skipped", reason: "user_id or org_user_id is required" };
+    } else {
+      const recipient = await User.findById(recipientUserId).select("email");
+      results.email = await sendNotificationEmail({
+        to: recipient?.email,
+        title,
+        message,
+        link,
+        data: { idempotency_key },
+      });
     }
   }
 
