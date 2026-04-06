@@ -76,7 +76,7 @@ Role emails:
 - Manager: `manager1@example.com`
 - Staff: `staff1@example.com` (or `staff2/3/4@example.com`)
 
-## Requirement Coverage (Current)
+## Requirement Coverage 
 ### Implemented
 - Manager-scoped schedule and shift management by assigned locations
 - Assignment rule enforcement:
@@ -119,8 +119,6 @@ Role emails:
   - schedules, shifts, shift assignments, swap requests, availabilities, notification preferences
 - Additional workflow audit logging for publish/unpublish, swap accept/decision/cancel, and assignment clock actions
 - Legacy endpoint hardening added for notifications, availabilities, preferences, skills, certifications, clock events, user roles, and user mutation routes
-
-### Partially Implemented 
 - Audit coverage is broad for scheduling domain entities, but legacy/non-scheduling modules may still need additional audit hooks
 - Endpoint auth/authorization hardening is applied for major routes, with continuing scope for incremental endpoint-level tightening
 
@@ -205,30 +203,3 @@ All currently tracked assignment edge cases in this project are handled in the a
 - Daily/weekly labor projection warnings and blocks
 - Assignment conflict locking and swap approval race protection
 
-## Additional Edge Cases To Cover (Beyond Prompt)
-1. Shift exactly touching boundaries (e.g., end at 14:00, next starts 14:00) should not be marked overlapping.
-2. Rest gap exactly 10 hours should pass; 9h59m should fail.
-3. Availability overnight window + DST transition hour skip/repeat.
-4. Staff with location-scoped availability for one branch but assignment at another branch same timezone.
-5. Shift reassignment while assignee is already clocked in elsewhere.
-6. Manager edits shift start time after assignments exist; re-validate all assignees automatically.
-7. Headcount reduction below already-assigned count.
-8. Simultaneous manager approval actions on the same swap request.
-9. Accepting staff becomes deactivated between peer acceptance and manager approval.
-10. Delete/deactivate skill used by future scheduled shifts.
-11. User role change (staff -> manager) while they still own future assignments.
-12. Duplicate notification generation on retries/idempotency failures.
-13. Cross-location weekly overtime when staff works in two timezones crossing UTC week boundary.
-14. Audit log export for large date ranges (pagination/streaming).
-15. Clock-out missing due to network loss; recovery and correction workflow.
-16. Schedule publish/unpublish race with cutoff time crossing mid-request.
-17. Expired swap request accepted at the same moment by two staff users.
-18. Staff timezone preference differing from location timezone (display consistency).
-
-## Testing
-Run current integration test:
-```bash
-npm test
-```
-
-Current test coverage is focused on swap accept/manager approval. Additional tests are recommended for assignment constraints, labor rules, realtime events, and concurrent operations.
